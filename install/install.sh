@@ -68,15 +68,19 @@ check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
 # Install missing brew packages
 if [ -n "$NEED_BREW" ]; then
     echo ""
-    echo "  Нужно установить через Homebrew: $NEED_BREW"
+    echo "  Не хватает: $NEED_BREW"
     if [ -x "$BREW_BIN" ]; then
-        echo -n "  Устанавливаю... "
-        eval "$($BREW_BIN shellenv)"
-        for pkg in $NEED_BREW; do
-            echo -n "$pkg... "
-            brew install "$pkg" 2>/dev/null || true
-        done
-        echo "✓"
+        echo -n "  Установить через Homebrew? [Y/n] "
+        read -r answer
+        if [ -z "$answer" ] || [ "$answer" = "y" ] || [ "$answer" = "Y" ] || [ "$answer" = "yes" ]; then
+            eval "$($BREW_BIN shellenv)"
+            for pkg in $NEED_BREW; do
+                echo -n "  → brew install $pkg... "
+                brew install "$pkg" 2>/dev/null && echo "✓" || echo "✗"
+            done
+        else
+            echo "  ⚠ Пропускаем установку пакетов."
+        fi
     else
         echo "  ⚠ Homebrew не найден. Установи вручную:"
         for pkg in $NEED_BREW; do

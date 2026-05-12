@@ -104,24 +104,35 @@ if [ -n "$NEED_BREW" ]; then
 fi
 
 # --- Step 1: cache sudo ---
-echo "[1/6] Кэшируем sudo (спросит пароль)..."
-# Read password directly from /dev/tty even when piped
+echo "[1/6] Кэшируем sudo..."
 if ! sudo -n true 2>/dev/null; then
-    echo -n "  Пароль sudo: "
-    stty -echo < /dev/tty 2>/dev/null || true
-    read -r SUDO_PASS < /dev/tty 2>/dev/null || {
-        echo ""
-        echo "[✗] Нет доступа к терминалу. Запусти скрипт локально:"
-        echo "    ./install.sh"
+    echo "  Нужен пароль sudo."
+    # Try reading password hidden
+    if [ -t 0 ] || [ -c /dev/tty ] 2>/dev/null; then
+        if [ -c /dev/tty ] 2>/dev/null; then
+            # piped but /dev/tty exists
+            echo -n "  Пароль sudo: "
+            stty -echo 2>/dev/null
+            read -r p < /dev/tty
+            stty echo 2>/dev/null
+            echo ""
+        else
+            # interactive
+            sudo -v && return
+        fi
+        if [ -n "$p" ]; then
+            echo "$p" | sudo -S true 2>/dev/null || {
+                echo "[✗] Неверный пароль"
+                exit 1
+            }
+            unset p
+        fi
+    else
+        echo "[✗] Скрипт требует sudo. Скачай и запусти локально:"
+        echo "    curl -L -o /tmp/install.sh https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh"
+        echo "    chmod +x /tmp/install.sh && /tmp/install.sh"
         exit 1
     }
-    stty echo < /dev/tty 2>/dev/null || true
-    echo ""
-    echo "$SUDO_PASS" | sudo -S true 2>/dev/null || {
-        echo "[✗] Неверный пароль"
-        exit 1
-    }
-    unset SUDO_PASS
 fi
 
 # Keep sudo alive in background

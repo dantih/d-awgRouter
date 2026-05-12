@@ -105,22 +105,34 @@ fi
 
 # --- Step 1: cache sudo ---
 echo "[1/6] Кэшируем sudo..."
-if sudo -n true 2>/dev/null; then
-    : # already cached
-elif [ -t 0 ]; then
-    # interactive terminal — ask for password
-    echo "  Введи пароль sudo:"
-    sudo -v || { echo "[✗] sudo недоступен"; exit 1; }
-else
-    # piped (curl | bash) — try SUDO_PASS env var
+if ! sudo -n true 2>/dev/null; then
     echo "  Нужен пароль sudo."
-    if [ -n "$SUDO_PASS" ]; then
-        echo "$SUDO_PASS" | sudo -S true 2>/dev/null || { echo "[✗] неверный пароль"; exit 1; }
+    # Try reading password hidden
+    if [ -t 0 ] || [ -c /dev/tty ] 2>/dev/null; then
+        if [ -c /dev/tty ] 2>/dev/null; then
+            # piped but /dev/tty exists
+            echo -n "  Пароль sudo: "
+            stty -echo 2>/dev/null
+            read -r p < /dev/tty
+            stty echo 2>/dev/null
+            echo ""
+        else
+            # interactive
+            sudo -v && return
+        fi
+        if [ -n "$p" ]; then
+            echo "$p" | sudo -S true 2>/dev/null || {
+                echo "[✗] Неверный пароль"
+                exit 1
+            }
+            unset p
+        fi
     else
-        echo "[✗] Запусти с флагом SUDO_PASS:"
-        echo "    export SUDO_PASS='твой_пароль' && curl ... | bash"
+        echo "[✗] Скрипт требует sudo. Скачай и запусти локально:"
+        echo "    curl -L -o /tmp/install.sh https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh"
+        echo "    chmod +x /tmp/install.sh && /tmp/install.sh"
         exit 1
-    fi
+    }
 fi
 
 # Keep sudo alive in background

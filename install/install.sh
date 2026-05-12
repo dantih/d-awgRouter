@@ -44,10 +44,13 @@ sudo chmod 755 "$BIN_DEST"
 
 # --- Step 3: sudoers ---
 echo "[3/5] Настраиваем /etc/sudoers.d/d-awg-router"
-SUDOERS_LINE="$USER ALL=(ALL) NOPASSWD: $BIN_DEST, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep"
+# Ищем wg и wireguard-go
+WG_BIN=$(which wg 2>/dev/null || echo "/opt/homebrew/bin/wg")
+WG_GO_BIN=$(which wireguard-go 2>/dev/null || echo "/opt/homebrew/bin/wireguard-go")
+SUDOERS_LINE="$USER ALL=(ALL) NOPASSWD: $BIN_DEST, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, $WG_BIN, $WG_GO_BIN"
 echo "$SUDOERS_LINE" | sudo tee "$SUDOERS_FILE" > /dev/null
 sudo chmod 440 "$SUDOERS_FILE"
-echo "  ✓ Разрешены: awg, amneziawg-go, route, ifconfig, kill, rm, pgrep"
+echo "  ✓ Разрешены: awg, amneziawg-go, route, ifconfig, kill, rm, pgrep, wg, wireguard-go"
 
 # --- Step 4: directory structure ---
 echo "[4/5] Создаём ~/.d-awg-router/{configs,cache,routes,state}"

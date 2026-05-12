@@ -31,13 +31,12 @@ var (
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
-	wgBin       = "/usr/local/bin/wg"
+	wgBin       = "/opt/homebrew/bin/wg"
 	awgBin      = "/usr/local/bin/awg"
 	awgGo       = "/usr/local/bin/amneziawg-go"
 )
 
 func initBins() {
-	// AWG/WG бинарники: ищем в PATH, потом в /opt/homebrew/bin
 	for _, b := range []struct {
 		dst *string
 		names []string
@@ -53,21 +52,10 @@ func initBins() {
 			}
 		}
 	}
-	// wireguard-go в PATH или brew
-	if _, err := exec.LookPath("wireguard-go"); err != nil {
-		if _, err2 := os.Stat("/opt/homebrew/bin/wireguard-go"); err2 == nil {
-			wireguardGoPath = "/opt/homebrew/bin/wireguard-go"
-		} else {
-			wireguardGoPath = "wireguard-go"
-		}
-	} else {
-		wireguardGoPath = "wireguard-go"
-	}
 }
 
-var wireguardGoPath string
-
 func init() {
+	initBins()
 	var err error
 	homeDir, err = os.UserHomeDir()
 	if err != nil {
@@ -128,7 +116,7 @@ func parseWGConfig(data string) (*AWGConfig, error) {
 			}
 		}
 	}
-		if cfg.PrivateKey == "" || cfg.Endpoint == "" || cfg.PublicKey == "" {
+	if cfg.PrivateKey == "" || cfg.Endpoint == "" || cfg.PublicKey == "" {
 		return nil, fmt.Errorf("неполный конфиг: нужны PrivateKey, Endpoint и PublicKey")
 	}
 	_, hasJc := re("Jc")
@@ -200,7 +188,8 @@ func listConfigs() []string {
 	entries, _ := os.ReadDir(configsDir)
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		// Показываем только *.conf, не временные файлы
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".conf") && !strings.HasPrefix(e.Name(), "._") {
 			names = append(names, e.Name())
 		}
 	}
@@ -209,6 +198,12 @@ func listConfigs() []string {
 }
 
 func getCurrentConfig() *AWGConfig {
+	// Сначала telegram.conf, потом любой другой
+	cfg, err := loadConfig("telegram.conf")
+	if err == nil && cfg.Address != "" {
+		return cfg
+	}
+	// fallback: любой конфиг с Address
 	for _, name := range listConfigs() {
 		if cfg, err := loadConfig(name); err == nil && cfg.Address != "" {
 			return cfg
@@ -254,7 +249,6 @@ func fetchServiceList() ([]ServiceInfo, error) {
 
 func fetchServiceCIDR(serviceName string) (string, error) {
 	path := strings.ReplaceAll(serviceName, " ", "%20")
-	// Пробуем разные имена .bat файлов: telegram.bat, <service>.bat, service.bat
 	candidates := []string{
 		"telegram.bat",
 		strings.ReplaceAll(serviceName, " ", "_") + ".bat",
@@ -267,7 +261,6 @@ func fetchServiceCIDR(serviceName string) (string, error) {
 			return parseBatCIDR(data), nil
 		}
 	}
-	// Ищем в папке сервиса
 	dirURL := fmt.Sprintf("https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global/%s", path)
 	if files, err := fetchDir(dirURL); err == nil {
 		for _, f := range files {
@@ -420,29 +413,42 @@ func setRoute(name string, active bool) {
 
 // === Interface ===
 
-func awgIP() string {
-	if cfg := getCurrentConfig(); cfg != nil {
-		return strings.Split(cfg.Address, "/")[0]
+func findWireGuardGo() string {
+	if p, err := exec.LookPath("wireguard-go"); err == nil {
+		return p
 	}
-	return ""
+	if _, err := os.Stat("/opt/homebrew/bin/wireguard-go"); err == nil {
+		return "/opt/homebrew/bin/wireguard-go"
+	}
+	return "wireguard-go"
 }
 
 func findActiveInterface() string {
-	out, err := sudo(awgBin, "show")
-	if err != nil || out == "" {
-		return ""
+	// Пробуем wg
+	if out, err := sudo(wgBin, "show"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, "interface: ") {
+				iface := strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
+				// Не трогаем utun6 (штатный WG)
+				if iface != "utun6" {
+					return iface
+				}
+			}
+		}
 	}
-	// awg show без аргументов показывает первый найденный интерфейс
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "interface: utun") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
+	// Пробуем awg
+	if out, err := sudo(awgBin, "show"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, "interface: ") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
+			}
 		}
 	}
 	return ""
 }
 
 func showInterface(iface string) (string, error) {
-	if out, err := sudo(awgBin, "show", iface); err == nil {
+	if out, err := sudo(awgBin, "show", iface); err == nil && len(out) > 0 {
 		return out, nil
 	}
 	return sudo(wgBin, "show", iface)
@@ -453,19 +459,12 @@ func isInterfaceAlive(iface string) bool {
 	return len(out) > 0
 }
 
-func pgrepBackground(iface string) []byte {
-	out, _ := exec.Command("pgrep", "-f", "(amneziawg-go|wireguard-go).*"+iface).Output()
-	return out
-}
-
 // === Sudo ===
 
-// // //
 func sudo(args ...string) (string, error) {
-	// Используем -n (non-interactive) для фоновых вызовов
 	args2 := append([]string{"-n"}, args...)
 	cmd := exec.Command("sudo", args2...)
-	cmd.Env = append(os.Environ(), "HOME="+homeDir, "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+	cmd.Env = append(os.Environ(), "HOME="+homeDir, "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -504,88 +503,107 @@ func removeAllRoutes() {
 	}
 }
 
-func cmdUp() string {
-	cfg := getCurrentConfig()
-	if cfg == nil || cfg.Address == "" {
-		return "[ERROR] Нет загруженного конфига с Address. Загрузите WireGuard конфиг."
-	}
+func wireguardUp(cfg *AWGConfig) string {
 	ip := strings.Split(cfg.Address, "/")[0]
-	iface := findActiveInterface()
-	if iface != "" && isInterfaceAlive(iface) {
-		out := fmt.Sprintf("[✓] Найден активный интерфейс %s\n", iface)
-		if routes := loadAllCIDRs(); routes != "" {
-			updateRoutes(iface, routes)
-			out += "[✓] Маршруты обновлены\n"
-		} else {
-			out += "[!] Нет активных сервисов\n"
-		}
-		so, _ := showInterface(iface)
-		out += so
-		return out
-	}
-	// Свободный utun
+
+	// Ищем свободный utun (6 занят штатным WG)
 	var freeDev string
-	for i := 6; i <= 15; i++ {
+	for i := 7; i <= 15; i++ {
 		dev := fmt.Sprintf("utun%d", i)
 		info, _ := exec.Command("ifconfig", dev).Output()
 		s := string(info)
-		if s == "" || (strings.Contains(s, "UP,POINTOPOINT,RUNNING") && !strings.Contains(s, "inet ")) {
+		if s == "" {
 			freeDev = dev
 			break
 		}
 	}
 	if freeDev == "" {
-		return "[ERROR] Нет свободных utun"
+		return "[ERROR] Нет свободных utun (7-15)"
 	}
-	iface = freeDev
+	iface := freeDev
 
-	kernConf := filepath.Join(configsDir, "._kern_setconf")
-	cfg.SaveKernelConfig(kernConf)
-	defer os.Remove(kernConf)
+	wgGo := findWireGuardGo()
 
-	if cfg.IsWireGuard {
-		startCmd := exec.Command("sudo", "-n", wireguardGoPath, iface)
-		startCmd.Stdout = nil
-		startCmd.Stderr = nil
-		startCmd.Start()
-		time.Sleep(2 * time.Second)
-		if !isInterfaceAlive(iface) {
-			return "[ERROR] wireguard-go не запустился на " + iface
-		}
-		sudo("/sbin/ifconfig", iface, ip, ip)
-		kernConf := filepath.Join(configsDir, "._kern_setconf")
-		cfg.SaveKernelConfig(kernConf)
-		defer os.Remove(kernConf)
-		sudo(wgBin, "setconf", iface, kernConf)
-		routes := loadAllCIDRs()
-		if routes != "" {
-			updateRoutes(iface, routes)
-		}
-		saveState(iface, ip)
-		so, _ := showInterface(iface)
-		out := fmt.Sprintf("[✓] WireGuard поднят на %s\n\n%s", iface, so)
-		if routes != "" {
-			out += fmt.Sprintf("\n[✓] Маршруты добавлены (%d подсетей)\n", countCIDRs(routes))
-		}
-		return out
-	}
-	// AWG: amneziawg-go
-	startCmd := exec.Command("sudo", "-n", awgGo, iface)
+	// Запускаем wireguard-go на интерфейсе
+	startCmd := exec.Command("sudo", "-n", wgGo, iface)
 	startCmd.Stdout = nil
 	startCmd.Stderr = nil
 	startCmd.Start()
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
+
 	if !isInterfaceAlive(iface) {
-		return "[ERROR] amneziawg-go не запустился на " + iface
+		return "[ERROR] wireguard-go не запустился на " + iface
 	}
+
+	// Назначаем IP
 	sudo("/sbin/ifconfig", iface, ip, ip)
-	kernConf = filepath.Join(configsDir, "._kern_setconf")
+
+	// Применяем конфиг через wg setconf
+	kernConf := filepath.Join(configsDir, "._wg_setconf")
 	cfg.SaveKernelConfig(kernConf)
-	sudo(awgBin, "setconf", iface, kernConf)
+	sudo(wgBin, "setconf", iface, kernConf)
+	os.Remove(kernConf)
+
+	// Маршруты выбранных сервисов
 	routes := loadAllCIDRs()
 	if routes != "" {
 		updateRoutes(iface, routes)
 	}
+
+	saveState(iface, ip)
+	so, _ := showInterface(iface)
+	out := fmt.Sprintf("[✓] WireGuard поднят на %s (через wireguard-go)\n\n%s", iface, so)
+	if routes != "" {
+		out += fmt.Sprintf("\n[✓] Маршруты добавлены (%d подсетей)\n", countCIDRs(routes))
+	}
+	return out
+}
+
+func amneziawgUp(cfg *AWGConfig) string {
+	ip := strings.Split(cfg.Address, "/")[0]
+
+	// Свободный utun (не utun6)
+	var freeDev string
+	for i := 7; i <= 15; i++ {
+		dev := fmt.Sprintf("utun%d", i)
+		info, _ := exec.Command("ifconfig", dev).Output()
+		s := string(info)
+		if s == "" {
+			freeDev = dev
+			break
+		}
+	}
+	if freeDev == "" {
+		return "[ERROR] Нет свободных utun (7-15)"
+	}
+	iface := freeDev
+
+	// Запускаем amneziawg-go
+	startCmd := exec.Command("sudo", "-n", awgGo, iface)
+	startCmd.Stdout = nil
+	startCmd.Stderr = nil
+	startCmd.Start()
+	time.Sleep(3 * time.Second)
+
+	if !isInterfaceAlive(iface) {
+		return "[ERROR] amneziawg-go не запустился на " + iface
+	}
+
+	// Назначаем IP
+	sudo("/sbin/ifconfig", iface, ip, ip)
+
+	// Применяем конфиг
+	kernConf := filepath.Join(configsDir, "._awg_setconf")
+	cfg.SaveKernelConfig(kernConf)
+	sudo(awgBin, "setconf", iface, kernConf)
+	defer os.Remove(kernConf)
+
+	// Маршруты выбранных сервисов
+	routes := loadAllCIDRs()
+	if routes != "" {
+		updateRoutes(iface, routes)
+	}
+
 	saveState(iface, ip)
 	so, _ := showInterface(iface)
 	out := fmt.Sprintf("[✓] AmneziaWG поднят на %s\n\n%s", iface, so)
@@ -595,12 +613,40 @@ func cmdUp() string {
 	return out
 }
 
+func cmdUp() string {
+	cfg := getCurrentConfig()
+	if cfg == nil || cfg.Address == "" {
+		return "[ERROR] Нет загруженного конфига с Address. Загрузите WireGuard конфиг."
+	}
+
+	// Если уже активен — просто шоу
+	if iface := findActiveInterface(); iface != "" && isInterfaceAlive(iface) {
+		out := fmt.Sprintf("[✓] Уже активен на %s\n", iface)
+		so, _ := showInterface(iface)
+		out += so
+		return out
+	}
+
+	// Убиваем что могло остаться
+	cmdDown()
+	time.Sleep(1 * time.Second)
+
+	if cfg.IsWireGuard {
+		return wireguardUp(cfg)
+	}
+	return amneziawgUp(cfg)
+}
+
 type State struct {
 	Interface string `json:"interface"`
 	IP        string `json:"ip"`
 }
-func statePath() string { return filepath.Join(stateDir, "current") }
-func saveState(iface, ip string) { d, _ := json.Marshal(State{iface, ip}); os.WriteFile(statePath(), d, 0644) }
+
+func statePath() string       { return filepath.Join(stateDir, "current") }
+func saveState(iface, ip string) {
+	d, _ := json.Marshal(State{iface, ip})
+	os.WriteFile(statePath(), d, 0644)
+}
 func clearState() { os.Remove(statePath()) }
 
 func cmdDown() string {
@@ -609,11 +655,15 @@ func cmdDown() string {
 		return "[!] Активный интерфейс не найден"
 	}
 	removeAllRoutes()
-	pids := pgrepBackground(iface)
-	if len(pids) > 0 {
-		sudo("kill", "-TERM", strings.TrimSpace(string(pids)))
-		time.Sleep(1 * time.Second)
-		sudo("kill", "-9", strings.TrimSpace(string(pids)))
+
+	// Убиваем процесс (wireguard-go или amneziawg-go)
+	for _, name := range []string{"wireguard-go", "amneziawg-go"} {
+		pids, _ := exec.Command("pgrep", "-f", name+".*"+iface).Output()
+		if len(pids) > 0 {
+			sudo("kill", "-TERM", strings.TrimSpace(string(pids)))
+			time.Sleep(1 * time.Second)
+			sudo("kill", "-9", strings.TrimSpace(string(pids)))
+		}
 	}
 	sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))
 	sudo("rm", "-f", fmt.Sprintf("/var/run/wireguard/%s.sock", iface))

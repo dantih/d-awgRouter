@@ -659,76 +659,174 @@ func initPage() {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>d-awg-router</title>
 <style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--fg:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--green:#238636;--red:#da3633;--blue:#1f6feb;--purple:#8957e5;--gray:#6e7681}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
-.container{max-width:900px;margin:0 auto}
-h1{font-size:1.5em;margin-bottom:4px;color:#58a6ff}
-.sub{color:#8b949e;font-size:13px;margin-bottom:16px}
-.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:16px}
-.card h2{font-size:14px;color:#8b949e;text-transform:uppercase;margin-bottom:12px}
-.btn{padding:8px 16px;border:none;border-radius:6px;font-size:13px;cursor:pointer;color:#fff;font-weight:500;display:inline-block}
-.btn-up{background:#238636}
-.btn-down{background:#da3633}
-.btn-restart{background:#1f6feb}
-.btn-show{background:#6e7681}
-.btn-routes{background:#8957e5}
-.btn-save{background:#1f6feb}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg);padding:16px}
+.container{max-width:960px;margin:0 auto}
+
+/* header */
+.header{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.header h1{font-size:1.3em;color:var(--accent)}
+.header .sub{color:var(--muted);font-size:12px;flex:1}
+
+/* status bar */
+.status-bar{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px}
+.status-item{display:flex;align-items:center;gap:6px}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.green{background:var(--green)}
+.status-dot.red{background:var(--red)}
+.status-dot.yellow{background:#d29922}
+
+/* tabs */
+.tabs{display:flex;gap:0;margin-bottom:0;border-bottom:1px solid var(--border)}
+.tab{padding:8px 18px;font-size:13px;cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;color:var(--muted);background:transparent;margin-bottom:-1px}
+.tab:hover{color:var(--fg);background:rgba(255,255,255,0.05)}
+.tab.active{color:var(--fg);background:var(--card);border-color:var(--border)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:0 8px 8px 8px;padding:16px;margin-bottom:16px}
+.card.flat{border-radius:8px}
+.card h2{font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px}
+.card h3{font-size:14px;color:var(--fg);margin-bottom:10px}
+
+/* buttons */
+.btn{padding:8px 16px;border:none;border-radius:6px;font-size:13px;cursor:pointer;color:#fff;font-weight:500;display:inline-flex;align-items:center;gap:6px;transition:filter .15s}
 .btn:hover{filter:brightness(1.2)}
-.btn:disabled{opacity:0.5;cursor:not-allowed}
-.flex{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.btn:disabled{opacity:0.35;cursor:not-allowed;filter:none}
+.btn-up{background:var(--green)}
+.btn-down{background:var(--red)}
+.btn-restart{background:var(--blue)}
+.btn-show{background:var(--gray)}
+.btn-routes{background:var(--purple)}
+.btn-save{background:var(--blue)}
+.btn-sm{padding:5px 10px;font-size:12px}
+
+.flex{display:flex;gap:8px;flex-wrap:wrap}
 .mt{margin-top:12px}
-pre{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:500px;overflow-y:auto}
-textarea.config{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;color:#c9d1d9;font-family:monospace;font-size:12px;min-height:180px;resize:vertical}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px}
-label{display:block;padding:4px 0;cursor:pointer;font-size:13px}
-label input{margin-right:6px}
+.mb{margin-bottom:12px}
+
+pre{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto}
+pre.output-sm{max-height:200px}
+
+textarea.config{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--fg);font-family:monospace;font-size:12px;min-height:200px;resize:vertical}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
+label.service{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s}
+label.service:hover{background:rgba(255,255,255,0.05)}
+label.service input{margin:0;width:16px;height:16px;cursor:pointer}
+.service-count{font-size:11px;color:var(--muted);margin-left:auto}
+
 .error{color:#f85149}
 .success{color:#3fb950}
-</style></head>
+.warning{color:#d29922}
+.info{color:var(--muted)}
+
+/* responsive */
+@media(max-width:640px){
+  .tabs{overflow-x:auto}
+  .tab{padding:8px 12px;white-space:nowrap}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+}
+</style>
+</head>
 <body>
 <div class="container">
-<h1>d-awg-router-web</h1>
-<p class="sub">AmneziaWG VPN Router</p>
 
-<div class="card">
-<h2>VPN</h2>
-<form method="post" class="flex" onsubmit="return confirmAction(event)">
-<button class="btn btn-up" name="cmd" value="up">UP</button>
-<button class="btn btn-down" name="cmd" value="down">DOWN</button>
-<button class="btn btn-restart" name="cmd" value="restart">RESTART</button>
-<button class="btn btn-show" name="cmd" value="show">SHOW</button>
-<button class="btn btn-routes" name="cmd" value="routes-force">ROUTES</button>
-</form>
+<!-- Header -->
+<div class="header">
+  <h1>d-awg-router</h1>
+  <span class="sub">AmneziaWG VPN Router</span>
 </div>
 
-<div class="card">
-<h2>WireGuard Config</h2>
-<form method="post">
-<textarea class="config" name="config" placeholder="[Interface]&#10;Address = 10.72.171.186/32&#10;PrivateKey = ...">__CONFIG_TEXT__</textarea>
-<div class="flex mt"><button class="btn btn-save" name="cmd" value="save-config">Save Config</button></div>
-</form>
-__CONFIG_SAVED__</div>
-
-<div class="card">
-<h2>Services</h2>
-<form method="post">
-<div class="grid">__SERVICES__</div>
-<div class="flex mt">
-<button class="btn btn-save" name="cmd" value="save-services">Save Selection</button>
-<button class="btn btn-routes" name="cmd" value="update-cidr">Update CIDR</button>
-</div>
-</form>
+<!-- Status Bar -->
+<div class="status-bar">
+  <span class="status-item">
+    <span class="status-dot __STATUS_DOT__"></span>
+    __STATUS_TEXT__
+  </span>
+  <span class="status-item" style="color:var(--muted)">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zM8 0a8 8 0 100 16A8 8 0 008 0zM6.5 5.5a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zM7 9h2v4H7V9z"/></svg>
+    __INTERFACE__
+  </span>
+  <span class="status-item" style="color:var(--muted)">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zM4.5 7.5a.5.5 0 010-1h1V5a.5.5 0 011 0v2.5a.5.5 0 01-.5.5h-1.5zm6 0a.5.5 0 010-1h1V5a.5.5 0 011 0v2.5a.5.5 0 01-.5.5h-1.5z"/></svg>
+    __ROUTES__
+  </span>
 </div>
 
-<div class="card">
-<h2>Output</h2>
-<pre>__OUTPUT__</pre>
+<!-- Tabs -->
+<div class="tabs" id="tabs">
+  <span class="tab active" data-tab="control">Control</span>
+  <span class="tab" data-tab="services">Services</span>
+  <span class="tab" data-tab="config">Config</span>
 </div>
+
+<!-- Tab: Control -->
+<div id="tab-control" class="tab-content active">
+  <div class="card">
+    <h2>Управление VPN</h2>
+    <form method="post" class="flex" onsubmit="return confirmAction(event)">
+      <button class="btn btn-up" name="cmd" value="up" id="btn-up" __UP_DISABLED__>UP</button>
+      <button class="btn btn-down" name="cmd" value="down" id="btn-down" __DOWN_DISABLED__>DOWN</button>
+      <button class="btn btn-restart" name="cmd" value="restart" id="btn-restart" __RESTART_DISABLED__>RESTART</button>
+      <button class="btn btn-show" name="cmd" value="show">SHOW</button>
+      <button class="btn btn-routes" name="cmd" value="routes-force" id="btn-routes" __ROUTES_DISABLED__>ROUTES</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Вывод</h2>
+    <pre class="output-sm">__OUTPUT__</pre>
+  </div>
 </div>
+
+<!-- Tab: Services -->
+<div id="tab-services" class="tab-content">
+  <div class="card flat">
+    <form method="post">
+      <div class="grid">__SERVICES__</div>
+      <div class="flex mt">
+        <button class="btn btn-save" name="cmd" value="save-services">Save Selection</button>
+        <button class="btn btn-routes" name="cmd" value="update-cidr">Update CIDR</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tab: Config -->
+<div id="tab-config" class="tab-content">
+  <div class="card flat">
+    <h2>WireGuard Config</h2>
+    <form method="post">
+      <textarea class="config" name="config" placeholder="[Interface]&#10;Address = ...&#10;PrivateKey = ...">__CONFIG_TEXT__</textarea>
+      <div class="flex mt mb">
+        <button class="btn btn-save" name="cmd" value="save-config">Save Config</button>
+        <button class="btn btn-show" name="cmd" value="show-config">Show Current</button>
+      </div>
+    </form>
+    __CONFIG_SAVED__
+  </div>
+</div>
+
+</div>
+
 <script>
+// Tabs
+document.addEventListener("click", function(e) {
+  var tab = e.target.closest(".tab");
+  if (!tab) return;
+  var name = tab.dataset.tab;
+  document.querySelectorAll(".tab").forEach(function(t){t.classList.remove("active")});
+  document.querySelectorAll(".tab-content").forEach(function(t){t.classList.remove("active")});
+  tab.classList.add("active");
+  document.getElementById("tab-"+name).classList.add("active");
+});
+
 function confirmAction(e) {
   var v = e.submitter.value;
-  if (v==="down"||v==="restart") return confirm(v==="down"?"Down VPN?":"Restart VPN?");
+  if (v==="down") return confirm("Down VPN?");
+  if (v==="restart") return confirm("Restart VPN?");
   return true;
 }
 </script>
@@ -829,10 +927,58 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func showPage(w http.ResponseWriter, output string) {
+	// Определяем статус
+	iface := findAWGInterface()
+	hasConfig := getCurrentConfig() != nil
+	vpnActive := iface != ""
+
+	statusDot := "red"
+	statusText := "Offline"
+	ifaceStr := "—"
+	routesStr := "—"
+	upDisabled := "disabled"
+	downDisabled := "disabled"
+	restartDisabled := "disabled"
+	routesDisabled := "disabled"
+
+	if hasConfig {
+		upDisabled = ""
+	}
+	if vpnActive {
+		statusDot = "green"
+		statusText = "Connected"
+		ifaceStr = iface
+		downDisabled = ""
+		restartDisabled = ""
+		// считаем маршруты
+		routeCount := 0
+		routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
+		for _, line := range strings.Split(string(routeOut), "\n") {
+			if strings.Contains(line, iface) {
+				routeCount++
+			}
+		}
+		routesStr = fmt.Sprintf("%d routes", routeCount)
+		if loadAllCIDRs() != "" {
+			routesDisabled = ""
+		}
+	}
+	if vpnActive && hasConfig {
+		// всё уже установлено выше
+	}
+
 	repl := map[string]string{
-		"__OUTPUT__":      output,
-		"__CONFIG_SAVED__": "",
-		"__CONFIG_TEXT__": "",
+		"__OUTPUT__":        output,
+		"__CONFIG_SAVED__":  "",
+		"__CONFIG_TEXT__":   "",
+		"__STATUS_DOT__":    statusDot,
+		"__STATUS_TEXT__":   statusText,
+		"__INTERFACE__":     ifaceStr,
+		"__ROUTES__":        routesStr,
+		"__UP_DISABLED__":   upDisabled,
+		"__DOWN_DISABLED__": downDisabled,
+		"__RESTART_DISABLED__": restartDisabled,
+		"__ROUTES_DISABLED__":  routesDisabled,
 	}
 	// Заполняем конфиг
 	if cfg := getCurrentConfig(); cfg != nil {

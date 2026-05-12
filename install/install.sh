@@ -60,26 +60,37 @@ check_dep() {
     fi
 }
 
-check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg"
-check_dep "wireguard-go" "wireguard-go" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go"
-check_dep "awg" "" "/usr/local/bin/awg"
-check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
+check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg" || true
+check_dep "wireguard-go" "wireguard-go" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go" || true
+check_dep "awg" "" "/usr/local/bin/awg" || true
+check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go" || true
 
-# Install missing brew packages
+# Install missing brew packages (non-interactive if piped, ask otherwise)
 if [ -n "$NEED_BREW" ]; then
+    INSTALL_ALL=false
+    if [ ! -t 0 ]; then
+        # piped (curl | bash) — install without asking
+        INSTALL_ALL=true
+    fi
     echo ""
     echo "  Не хватает: $NEED_BREW"
     if [ -x "$BREW_BIN" ]; then
-        echo -n "  Установить через Homebrew? [Y/n] "
-        read -r answer
-        if [ -z "$answer" ] || [ "$answer" = "y" ] || [ "$answer" = "Y" ] || [ "$answer" = "yes" ]; then
+        if [ "$INSTALL_ALL" = false ]; then
+            echo -n "  Установить через Homebrew? [Y/n] "
+            read -r answer
+            if [ -n "$answer" ] && [ "$answer" != "y" ] && [ "$answer" != "Y" ] && [ "$answer" != "yes" ]; then
+                echo "  ⚠ Пропускаем установку пакетов."
+                INSTALL_ALL=false
+            else
+                INSTALL_ALL=true
+            fi
+        fi
+        if [ "$INSTALL_ALL" = true ]; then
             eval "$($BREW_BIN shellenv)"
             for pkg in $NEED_BREW; do
                 echo -n "  → brew install $pkg... "
                 brew install "$pkg" 2>/dev/null && echo "✓" || echo "✗"
             done
-        else
-            echo "  ⚠ Пропускаем установку пакетов."
         fi
     else
         echo "  ⚠ Homebrew не найден. Установи вручную:"

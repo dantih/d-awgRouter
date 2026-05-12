@@ -777,6 +777,7 @@ func initPage() {
 	pageHTML = `<!DOCTYPE html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3e%3crect x='0' y='0' width='512' height='512' rx='112' fill='%230d1117'/%3e%3cpath d='M256 60 L400 130 L400 280 Q400 400 256 460 Q112 400 112 280 L112 130 Z' fill='none' stroke='%2358a6ff' stroke-width='8' opacity='.6'/%3e%3cellipse cx='256' cy='240' rx='50' ry='40' fill='none' stroke='%2358a6ff' stroke-width='4' opacity='.3'/%3e%3cellipse cx='238' cy='230' rx='8' ry='10' fill='%230d1117' stroke='%2358a6ff' stroke-width='2'/%3e%3cellipse cx='274' cy='230' rx='8' ry='10' fill='%230d1117' stroke='%2358a6ff' stroke-width='2'/%3e%3c/svg%3e">
 <title>d-awg-router</title>
 <style>
 :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--fg:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--green:#238636;--red:#da3633;--blue:#1f6feb;--purple:#8957e5;--gray:#6e7681}
@@ -856,8 +857,9 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 
 <!-- Header -->
 <div class="header">
+  <img src="/icon" alt="" width="28" height="28" style="border-radius:6px;flex-shrink:0">
   <h1>d-awg-router</h1>
-  <span class="sub">AmneziaWG VPN Router</span>
+  <span class="sub">WireGuard / AmneziaWG VPN Router</span>
 </div>
 
 <!-- Status Bar -->
@@ -1149,9 +1151,26 @@ func htmlEsc(s string) string {
 	return s
 }
 
+func iconHandler(w http.ResponseWriter, r *http.Request) {
+	iconPath := filepath.Join(awgDir, "awg-icon.png")
+	// Fallback: relative to binary
+	if _, err := os.Stat(iconPath); err != nil {
+		iconPath = filepath.Join(homeDir, ".d-awg-router", "awg-icon.png")
+	}
+	data, err := os.ReadFile(iconPath)
+	if err != nil {
+		w.WriteHeader(404)
+		w.Write([]byte("icon not found"))
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Write(data)
+}
+
 func main() {
 	initPage()
 	http.HandleFunc("/", handler)
+	http.HandleFunc("/icon", iconHandler)
 	addr := fmt.Sprintf("%s:%s", host, port)
 	println("d-awg-router-web on", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {

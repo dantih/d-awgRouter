@@ -115,7 +115,7 @@ echo "[2/6] Скачиваем $NAME из GitHub Releases..."
 TMP_BIN=$(mktemp)
 echo -n "  ⏳ Загрузка... "
 HTTP_CODE=$(curl -fL --progress-bar -o "$TMP_BIN" "$RELEASE_URL" 2>&1 | tail -1) || true
-if [ -s "$TMP_BIN" ] && file "$TMP_BIN" | grep -qi "Mach-O"; then
+if [ -s "$TMP_BIN" ] && [ "$(stat -f%z "$TMP_BIN" 2>/dev/null || echo 0)" -gt 1000000 ]; then
     chmod +x "$TMP_BIN"
     SIZE=$(du -h "$TMP_BIN" | cut -f1)
     echo "✓ $SIZE"

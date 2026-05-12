@@ -1,15 +1,18 @@
 # d-awgRouter
 
-**d-awgRouter** — веб-сервис для управления **AmneziaWG VPN** на macOS: загрузка конфигов, динамический выбор маршрутов из GitHub (RockBlack-VPN/ip-address), управление интерфейсом.
+**d-awgRouter** — веб-сервис для управления **WireGuard / AmneziaWG VPN** на macOS: загрузка конфигов, динамический выбор маршрутов из GitHub (RockBlack-VPN/ip-address), управление интерфейсом.
+
+Автоматически определяет тип конфига — обычный WireGuard или AmneziaWG — по наличию параметров `Jc`/`Jmin`/`Jmax` в конфиге.
 
 ## Как это работает
 
 ```
-пользователь → веб-интерфейс → Go binary (sudo -n) → awg + route
-                  (127.0.0.1:8765)
+пользователь → веб-интерфейс (127.0.0.1:8765) → Go binary (sudo -n)
+                                              ├── AmneziaWG: awg + amneziawg-go
+                                              └── WireGuard: wg + wireguard-go
 ```
 
-Маршруты (CIDR-подсети) для разных сервисов (Telegram, YouTube, Netflix и т.д.) загружаются из [RockBlack-VPN/ip-address](https://github.com/RockBlack-VPN/ip-address). Выбираешь нужные — они добавляются на AWG-интерфейс.
+Маршруты (CIDR-подсети) для разных сервисов (Telegram, YouTube, Netflix и т.д.) загружаются из [RockBlack-VPN/ip-address](https://github.com/RockBlack-VPN/ip-address). Выбираешь нужные — они добавляются на VPN-интерфейс.
 
 ## Структура папок
 
@@ -23,34 +26,92 @@
 
 ## Быстрый старт
 
+### Установка из release
+
 ```bash
-# 1. Скопировать на Mac и установить
-scp bin/d-awg-router-web-darwin-arm64 mac:/tmp/d-awg-router-web
-scp install/install.sh mac:/tmp/
-ssh mac 'cd /tmp && bash install.sh'
+# Скачать последнюю версию
+curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
+chmod +x /tmp/d-awg-router-web
+echo "PASSWORD_REMOVED" | sudo -S mv /tmp/d-awg-router-web /usr/local/bin/d-awg-router-web
 
-# 2. Открыть в браузере
-open http://127.0.0.1:8765/
-
-# 3. Вставить WireGuard конфиг → Save Config
-# 4. Выбрать сервисы (Telegram, YouTube, ...) → Save Selection
-# 5. Нажать UP
+# Убедиться, что установлены зависимости (см. Требования ниже)
 ```
 
-## Сборка
-
-Сборка статического бинарника под macOS ARM64 из Linux:
+### Настройка launchd
 
 ```bash
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o d-awg-router-web cmd/d-awg-router-web/main.go
+mkdir -p ~/Library/LaunchAgents
+
+cat > ~/Library/LaunchAgents/com.d-awg-router.web.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.d-awg-router.web</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/d-awg-router-web</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>/Users/$(whoami)</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/com.d-awg-router.web.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.d-awg-router.web.err</string>
+</dict>
+</plist>
+EOF
+
+launchctl load ~/Library/LaunchAgents/com.d-awg-router.web.plist
+```
+
+### Использование
+
+```bash
+# Открыть в браузере (через SSH-туннель)
+ssh -L 8765:127.0.0.1:8765 mac
+
+# В браузере:
+# 1. Config → вставить WireGuard или AmneziaWG конфиг → Save Config
+# 2. Services → выбрать нужные (Telegram, YouTube, ...) → Save Selection
+# 3. Control → UP
 ```
 
 ## Требования
 
+### Для AmneziaWG
 - macOS (Apple Silicon)
-- [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) установлен
-- [awg](https://github.com/amnezia-vpn/amneziawg-tools) в `/usr/local/bin/`
-- Одноразовый пароль sudo при установке
+- [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) бинарник
+- [awg](https://github.com/amnezia-vpn/amneziawg-tools) (amneziawg-tools)
+
+### Для обычного WireGuard
+- [wireguard-go](https://www.wireguard.com/) — `brew install wireguard-go`
+- [wireguard-tools](https://www.wireguard.com/) — `brew install wireguard-tools`
+
+Бинарники `wg` и `wireguard-go` должны быть в PATH (или в `/opt/homebrew/bin/`).
+
+## Сборка
+
+```bash
+GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o d-awg-router-web-darwin-arm64 ./cmd/d-awg-router-web/
+```
+
+## Автоопределение типа VPN
+
+Система автоматически определяет тип конфига:
+
+| Флаг | AmneziaWG | WireGuard |
+|------|-----------|-----------|
+| `Jc` | ✅ есть | ❓ нет |
+| `Jmin` | ✅ есть | ❓ нет |
+| `Jmax` | ✅ есть | ❓ нет |
+| Бекенд | `amneziawg-go` | `wireguard-go` |
+| Инструменты | `awg` | `wg` |
 
 ## Безопасность
 

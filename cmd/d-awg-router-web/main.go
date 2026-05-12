@@ -36,6 +36,37 @@ var (
 	awgGo       = "/usr/local/bin/amneziawg-go"
 )
 
+func initBins() {
+	// AWG/WG бинарники: ищем в PATH, потом в /opt/homebrew/bin
+	for _, b := range []struct {
+		dst *string
+		names []string
+	}{
+		{&wgBin, []string{"wg", "/opt/homebrew/bin/wg"}},
+		{&awgBin, []string{"awg"}},
+		{&awgGo, []string{"amneziawg-go"}},
+	} {
+		for _, n := range b.names {
+			if p, err := exec.LookPath(n); err == nil {
+				*b.dst = p
+				break
+			}
+		}
+	}
+	// wireguard-go в PATH или brew
+	if _, err := exec.LookPath("wireguard-go"); err != nil {
+		if _, err2 := os.Stat("/opt/homebrew/bin/wireguard-go"); err2 == nil {
+			wireguardGoPath = "/opt/homebrew/bin/wireguard-go"
+		} else {
+			wireguardGoPath = "wireguard-go"
+		}
+	} else {
+		wireguardGoPath = "wireguard-go"
+	}
+}
+
+var wireguardGoPath string
+
 func init() {
 	var err error
 	homeDir, err = os.UserHomeDir()
@@ -510,9 +541,10 @@ func cmdUp() string {
 
 	kernConf := filepath.Join(configsDir, "._kern_setconf")
 	cfg.SaveKernelConfig(kernConf)
+	defer os.Remove(kernConf)
 
 	if cfg.IsWireGuard {
-		startCmd := exec.Command("sudo", "-n", "wireguard-go", iface)
+		startCmd := exec.Command("sudo", "-n", wireguardGoPath, iface)
 		startCmd.Stdout = nil
 		startCmd.Stderr = nil
 		startCmd.Start()
@@ -521,7 +553,9 @@ func cmdUp() string {
 			return "[ERROR] wireguard-go не запустился на " + iface
 		}
 		sudo("/sbin/ifconfig", iface, ip, ip)
+		kernConf := filepath.Join(configsDir, "._kern_setconf")
 		cfg.SaveKernelConfig(kernConf)
+		defer os.Remove(kernConf)
 		sudo(wgBin, "setconf", iface, kernConf)
 		routes := loadAllCIDRs()
 		if routes != "" {

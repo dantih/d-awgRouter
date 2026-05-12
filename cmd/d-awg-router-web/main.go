@@ -29,6 +29,8 @@ var (
 	routesDir  string
 	stateDir   string
 	activeCfg  string // имя активного конфига
+	langName   string // текущий язык "en" или "ru"
+	lang       LangMap
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
@@ -36,6 +38,16 @@ var (
 	awgBin      = "/usr/local/bin/awg"
 	awgGo       = "/usr/local/bin/amneziawg-go"
 )
+
+func tr(key string, args ...interface{}) string {
+	if v, ok := lang[key]; ok {
+		if len(args) > 0 {
+			return fmt.Sprintf(v, args...)
+		}
+		return v
+	}
+	return key
+}
 
 func initBins() {
 	for _, b := range []struct {
@@ -70,6 +82,15 @@ func init() {
 	for _, d := range []string{configsDir, cacheDir, routesDir, stateDir} {
 		os.MkdirAll(d, 0755)
 	}
+	// Загрузка языка
+	langName = "en"
+	if data, err := os.ReadFile(filepath.Join(awgDir, "lang")); err == nil {
+		l := strings.TrimSpace(string(data))
+		if _, ok := langData[l]; ok {
+			langName = l
+		}
+	}
+	lang = langData[langName]
 }
 
 // === WireGuard Config ===
@@ -596,9 +617,9 @@ func wireguardUp(cfg *AWGConfig) string {
 
 	saveState(iface, ip)
 	so, _ := showInterface(iface)
-	out := fmt.Sprintf("[✓] WireGuard поднят на %s (через wireguard-go)\n\n%s", iface, so)
+	out := fmt.Sprintf("[✓] "+tr("s.wg_up", iface)+"\n\n%s", so)
 	if routes != "" {
-		out += fmt.Sprintf("\n[✓] Маршруты добавлены (%d подсетей)\n", countCIDRs(routes))
+		out += fmt.Sprintf("\n[✓] %s (%d %s)\n", tr("s.updated"), countCIDRs(routes), tr("s.nets"))
 	}
 	return out
 }
@@ -650,9 +671,9 @@ func amneziawgUp(cfg *AWGConfig) string {
 
 	saveState(iface, ip)
 	so, _ := showInterface(iface)
-	out := fmt.Sprintf("[✓] AmneziaWG поднят на %s\n\n%s", iface, so)
+	out := fmt.Sprintf("[✓] "+tr("s.awg_up", iface)+"\n\n%s", so)
 	if routes != "" {
-		out += fmt.Sprintf("\n[✓] Маршруты добавлены (%d подсетей)\n", countCIDRs(routes))
+		out += fmt.Sprintf("\n[✓] %s (%d %s)\n", tr("s.updated"), countCIDRs(routes), tr("s.nets"))
 	}
 	return out
 }
@@ -660,12 +681,12 @@ func amneziawgUp(cfg *AWGConfig) string {
 func cmdUp() string {
 	cfg := getCurrentConfig()
 	if cfg == nil || cfg.Address == "" {
-		return "[ERROR] Нет загруженного конфига с Address. Загрузите WireGuard конфиг."
+		return "[ERROR] " + tr("s.config_needed")
 	}
 
 	// Если уже активен — просто шоу
 	if iface := findActiveInterface(); iface != "" && isInterfaceAlive(iface) {
-		out := fmt.Sprintf("[✓] Уже активен на %s\n", iface)
+		out := fmt.Sprintf("[✓] %s %s\n", tr("s.already_up"), iface)
 		so, _ := showInterface(iface)
 		out += so
 		return out
@@ -696,7 +717,7 @@ func clearState() { os.Remove(statePath()) }
 func cmdDown() string {
 	iface := findActiveInterface()
 	if iface == "" {
-		return "[!] Активный интерфейс не найден"
+		return "[!] " + tr("s.none_active")
 	}
 	removeAllRoutes()
 
@@ -712,7 +733,7 @@ func cmdDown() string {
 	sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))
 	sudo("rm", "-f", fmt.Sprintf("/var/run/wireguard/%s.sock", iface))
 	clearState()
-	return fmt.Sprintf("[✓] %s опущен", iface)
+	return fmt.Sprintf("[✓] %s %s", iface, tr("s.down_iface"))
 }
 
 func cmdRestart() string {
@@ -727,7 +748,7 @@ func cmdRestart() string {
 func cmdShow() string {
 	iface := findActiveInterface()
 	if iface == "" {
-		return "[!] WG/AWG не активен"
+		return "[!] " + tr("s.none_active")
 	}
 	var out string
 	out += fmt.Sprintf("=== %s ===\n", iface)
@@ -742,10 +763,10 @@ func cmdShow() string {
 			}
 		}
 	}
-	out += "\n=== Активные маршруты ===\n"
+	out += "\n" + tr("s.output_routes") + "\n"
 	routes := loadRoutes()
 	if len(routes) == 0 {
-		out += "  (нет выбранных сервисов)\n"
+		out += "  " + tr("s.no_services") + "\n"
 	} else {
 		routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
 		rt := strings.Split(string(routeOut), "\n")
@@ -775,20 +796,20 @@ func cmdShow() string {
 func cmdRoutesForce() string {
 	iface := findActiveInterface()
 	if iface == "" {
-		return "[!] WG/AWG не активен. Запустите UP сначала."
+		return "[!] " + tr("s.up_first")
 	}
 	routes := loadAllCIDRs()
 	if routes == "" {
-		return "[!] Нет активных сервисов"
+		return "[!] " + tr("s.no_services")
 	}
 	updateRoutes(iface, routes)
-	return fmt.Sprintf("[✓] Маршруты обновлены на %s (%d подсетей)", iface, countCIDRs(routes))
+	return fmt.Sprintf("[✓] %s %s (%d %s)", tr("s.updated"), iface, countCIDRs(routes), tr("s.nets"))
 }
 
 func updateAllCIDRs() string {
 	services, err := fetchServiceList()
 	if err != nil {
-		return "[WARN] GitHub недоступен, использую кэш"
+		return "[WARN] " + tr("s.github_unavail")
 	}
 	active := loadRoutes()
 	am := make(map[string]bool)
@@ -803,12 +824,12 @@ func updateAllCIDRs() string {
 		cidrData, err := fetchServiceCIDR(s.Name)
 		if err != nil {
 			if cached := loadCIDRCache(s.Name); cached != "" {
-				out += fmt.Sprintf("[✓] %s: из кэша (%d)\n", s.Name, countCIDRs(cached))
+				out += fmt.Sprintf("[✓] %s: %s (%d)\n", s.Name, tr("s.cached"), countCIDRs(cached))
 			}
 			continue
 		}
 		saveCIDRCache(s.Name, cidrData)
-		out += fmt.Sprintf("[✓] %s: загружено %d подсетей\n", s.Name, countCIDRs(cidrData))
+		out += fmt.Sprintf("[✓] %s: %s %d\n", s.Name, tr("s.loaded"), countCIDRs(cidrData))
 	}
 	return out
 }
@@ -909,6 +930,13 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
   <img src="/icon" alt="" width="28" height="28" style="border-radius:6px;flex-shrink:0">
   <h1>d-awg-router</h1>
   <span class="sub">WireGuard / AmneziaWG VPN Router</span>
+  <div style="margin-left:auto;font-size:12px;display:flex;align-items:center;gap:4px">
+    <span style="color:var(--muted)">__L_LANG__:</span>
+    <select id="lang-select" onchange="switchLang(this.value)" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;color:var(--fg);font-size:12px">
+      <option value="en" __L_SEL_EN__>English</option>
+      <option value="ru" __L_SEL_RU__>Русский</option>
+    </select>
+  </div>
 </div>
 
 <!-- Status Bar -->
@@ -929,25 +957,25 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 
 <!-- Tabs -->
 <div class="tabs" id="tabs">
-  <span class="tab active" data-tab="control">Control</span>
-  <span class="tab" data-tab="services">Services</span>
-  <span class="tab" data-tab="config">Config</span>
+  <span class="tab active" data-tab="control">__L_TAB_CONTROL__</span>
+  <span class="tab" data-tab="services">__L_TAB_SERVICES__</span>
+  <span class="tab" data-tab="config">__L_TAB_CONFIG__</span>
 </div>
 
 <!-- Tab: Control -->
 <div id="tab-control" class="tab-content active">
   <div class="card">
-    <h2>Управление VPN</h2>
+    <h2>__L_TAB_CONTROL__</h2>
     <form method="post" class="flex" onsubmit="return confirmAction(event)">
-      <button class="btn btn-up" name="cmd" value="up" id="btn-up" __UP_DISABLED__>UP</button>
-      <button class="btn btn-down" name="cmd" value="down" id="btn-down" __DOWN_DISABLED__>DOWN</button>
-      <button class="btn btn-restart" name="cmd" value="restart" id="btn-restart" __RESTART_DISABLED__>RESTART</button>
+      <button class="btn btn-up" name="cmd" value="up" id="btn-up" __UP_DISABLED__>__L_BTN_UP__</button>
+      <button class="btn btn-down" name="cmd" value="down" id="btn-down" __DOWN_DISABLED__>__L_BTN_DOWN__</button>
+      <button class="btn btn-restart" name="cmd" value="restart" id="btn-restart" __RESTART_DISABLED__>__L_BTN_RESTART__</button>
       <button class="btn btn-show" name="cmd" value="show">SHOW</button>
       <button class="btn btn-routes" name="cmd" value="routes-force" id="btn-routes" __ROUTES_DISABLED__>ROUTES</button>
     </form>
   </div>
   <div class="card">
-    <h2>Вывод</h2>
+    <h2>__L_OUTPUT__</h2>
     <pre class="output-sm">__OUTPUT__</pre>
   </div>
 </div>
@@ -958,8 +986,8 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
     <form method="post">
       <div class="grid">__SERVICES__</div>
       <div class="flex mt">
-        <button class="btn btn-save" name="cmd" value="save-services">Save Selection</button>
-        <button class="btn btn-routes" name="cmd" value="update-cidr">Update CIDR</button>
+        <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
+        <button class="btn btn-routes" name="cmd" value="update-cidr">__L_BTN_LOAD__</button>
       </div>
     </form>
   </div>
@@ -969,16 +997,16 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 <div id="tab-config" class="tab-content">
   <div class="card flat" style="display:flex;gap:16px;flex-wrap:wrap">
     <div style="min-width:180px;flex-shrink:0">
-      <h2>Confi­gurations</h2>
+      <h2>__L_CONFIG_TITLE__</h2>
       <div id="config-list" style="margin-bottom:10px">__CONFIG_LIST__</div>
-      <button class="btn btn-sm btn-save" onclick="newConfig()">+ New</button>
+      <button class="btn btn-sm btn-save" onclick="newConfig()">__L_BTN_NEW__</button>
     </div>
     <div style="flex:1;min-width:280px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
         <input type="text" id="config-name" value="__CONFIG_NAME__" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--fg);font-size:13px;flex:1;min-width:120px">
-        <button class="btn btn-sm btn-save" onclick="saveConfig()">Save</button>
-        <button class="btn btn-sm btn-restart" onclick="activateConfig()">Activate</button>
-        <button class="btn btn-sm btn-down" onclick="deleteConfig()" id="btn-del-config">Delete</button>
+        <button class="btn btn-sm btn-save" onclick="saveConfig()">__L_BTN_SAVE__</button>
+        <button class="btn btn-sm btn-restart" onclick="activateConfig()">__L_BTN_ACTIVATE__</button>
+        <button class="btn btn-sm btn-down" onclick="deleteConfig()" id="btn-del-config">__L_BTN_DELETE__</button>
       </div>
       <textarea class="config" id="config-text" style="min-height:200px" placeholder="[Interface]&#10;Address = ...&#10;PrivateKey = ...">__CONFIG_TEXT__</textarea>
       <div id="config-msg" class="mt" style="font-size:13px">__CONFIG_MSG__</div>
@@ -1002,8 +1030,8 @@ document.addEventListener("click", function(e) {
 
 function confirmAction(e) {
   var v = e.submitter.value;
-  if (v==="down") return confirm("Down VPN?");
-  if (v==="restart") return confirm("Restart VPN?");
+  if (v==="down") return confirm("__L_CONFIRM_DOWN__");
+  if (v==="restart") return confirm("__L_CONFIRM_RESTART__");
   return true;
 }
 
@@ -1053,7 +1081,7 @@ function saveConfig() {
 }
 
 function deleteConfig() {
-  if (!confirm('Delete config "'+cfgDisplay(currentConfig)+'"?')) return;
+  if (!confirm('__L_CONFIRM_DEL__ "'+cfgDisplay(currentConfig)+'"?')) return;
   var x = new XMLHttpRequest();
   x.open('POST', '/api/config/delete', true);
   x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
@@ -1121,6 +1149,14 @@ function showCfgMsg(msg) {
 
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function switchLang(l) {
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/lang', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() { location.reload(); };
+  x.send('lang='+encodeURIComponent(l));
 }
 
 // Initial load: load active config
@@ -1200,11 +1236,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			// Добавляем новые
 			if routes := loadAllCIDRs(); routes != "" {
 				updateRoutes(iface, routes)
-				out += fmt.Sprintf("\n[✓] Маршруты обновлены (%d подсетей)", countCIDRs(routes))
+				out += fmt.Sprintf("\n[✓] %s (%d %s)", tr("s.updated"), countCIDRs(routes), tr("s.nets"))
 			}
 		}
 
-		showPage(w, `<span class="success">Saved.</span><br>`+out)
+		showPage(w, fmt.Sprintf(`<span class="success">%s</span><br>`, tr("s.saved"))+out)
 	case "update-cidr":
 		showPage(w, updateAllCIDRs())
 	case "up":
@@ -1278,6 +1314,41 @@ func showPage(w http.ResponseWriter, output string) {
 		"__DOWN_DISABLED__": downDisabled,
 		"__RESTART_DISABLED__": restartDisabled,
 		"__ROUTES_DISABLED__":  routesDisabled,
+		"__LANG__":          langName,
+		"__L_TAB_CONTROL__": lang["tab.control"],
+		"__L_TAB_SERVICES__": lang["tab.services"],
+		"__L_TAB_CONFIG__":  lang["tab.config"],
+		"__L_BTN_UP__":      lang["btn.up"],
+		"__L_BTN_DOWN__":    lang["btn.down"],
+		"__L_BTN_RESTART__": lang["btn.restart"],
+		"__L_BTN_LOAD__":    lang["btn.load_routes"],
+		"__L_BTN_SAVE__":    lang["btn.save"],
+		"__L_BTN_ACTIVATE__": lang["btn.activate"],
+		"__L_BTN_DELETE__":  lang["btn.delete"],
+		"__L_BTN_NEW__":     lang["btn.new"],
+		"__L_STATUS_ONLINE__": lang["status.online"],
+		"__L_STATUS_OFFLINE__": lang["status.offline"],
+		"__L_IFACE__":       lang["status.iface"],
+		"__L_ROUTES__":      lang["status.routes"],
+		"__L_SERVICES__":    lang["services.title"],
+		"__L_CONFIG_TITLE__": lang["config.title"],
+		"__L_OUTPUT__":      lang["output.label"],
+		"__L_LANG__":        lang["lang.label"],
+		"__L_ACTIVATED__":   lang["config.activated"],
+		"__L_CFG_EMPTY__":   lang["config.empty_err"],
+		"__L_CFG_NAME_ERR__": lang["config.name_err"],
+		"__L_CFG_SAVED__":   lang["config.saved"],
+		"__L_CFG_DELETED__": lang["config.deleted"],
+		"__L_CONFIRM_DOWN__": lang["confirm.down"],
+		"__L_CONFIRM_RESTART__": lang["confirm.restart"],
+		"__L_CONFIRM_DEL__": lang["confirm.delete"],
+		"__L_SEL_EN__": "",
+		"__L_SEL_RU__": "",
+	}
+	if langName == "ru" {
+		repl["__L_SEL_RU__"] = "selected"
+	} else {
+		repl["__L_SEL_EN__"] = "selected"
 	}
 	// Заполняем активный конфиг
 	cfgName := getActiveConfigName()
@@ -1307,7 +1378,7 @@ func showPage(w http.ResponseWriter, output string) {
 	}
 	var svcHTML strings.Builder
 	if len(services) == 0 {
-		svcHTML.WriteString(`<span class="error">GitHub недоступен</span>`)
+		svcHTML.WriteString(`<span class="error">` + tr("s.github_unavail") + `</span>`)
 	} else {
 		for _, s := range services {
 			checked := ""
@@ -1336,6 +1407,19 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimSuffix(path, "/")
 
 	switch path {
+	case "/lang":
+		if r.Method == "POST" {
+			r.ParseForm()
+			l := r.FormValue("lang")
+			if _, ok := langData[l]; ok {
+				langName = l
+				lang = langData[l]
+				os.WriteFile(filepath.Join(awgDir, "lang"), []byte(l), 0644)
+				respondJSON(w, map[string]string{"lang": l})
+				return
+			}
+		}
+		respondJSON(w, map[string]string{"lang": langName})
 	case "/configs":
 		configs := listConfigs()
 		active := getActiveConfigName()
@@ -1447,7 +1531,7 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		saveActiveConfigName(name)
 		respondJSON(w, map[string]string{
-			"message": fmt.Sprintf("Activated %s", strings.TrimSuffix(name, ".conf")),
+			"message": fmt.Sprintf("%s — %s", strings.TrimSuffix(name, ".conf"), lang["config.activated"]),
 			"name":    name,
 		})
 

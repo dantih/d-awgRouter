@@ -31,6 +31,7 @@ var (
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
+	wgBin       = "/usr/local/bin/wg"
 	awgBin      = "/usr/local/bin/awg"
 	awgGo       = "/usr/local/bin/amneziawg-go"
 )
@@ -61,6 +62,7 @@ type AWGConfig struct {
 	S1, S2     int
 	H1, H2, H3, H4 int
 	PublicKey  string
+	IsWireGuard bool
 	AllowedIPs string
 	Endpoint   string
 	PKA        int
@@ -95,9 +97,11 @@ func parseWGConfig(data string) (*AWGConfig, error) {
 			}
 		}
 	}
-	if cfg.PrivateKey == "" || cfg.Endpoint == "" || cfg.PublicKey == "" {
+		if cfg.PrivateKey == "" || cfg.Endpoint == "" || cfg.PublicKey == "" {
 		return nil, fmt.Errorf("неполный конфиг: нужны PrivateKey, Endpoint и PublicKey")
 	}
+	_, hasJc := re("Jc")
+	cfg.IsWireGuard = !hasJc
 	return cfg, nil
 }
 
@@ -111,15 +115,17 @@ func (c *AWGConfig) Save(path string) error {
 	if c.DNS != "" {
 		buf.WriteString(fmt.Sprintf("DNS = %s\n", c.DNS))
 	}
-	buf.WriteString(fmt.Sprintf("Jc = %d\n", c.Jc))
-	buf.WriteString(fmt.Sprintf("Jmin = %d\n", c.Jmin))
-	buf.WriteString(fmt.Sprintf("Jmax = %d\n", c.Jmax))
-	buf.WriteString(fmt.Sprintf("S1 = %d\n", c.S1))
-	buf.WriteString(fmt.Sprintf("S2 = %d\n", c.S2))
-	buf.WriteString(fmt.Sprintf("H1 = %d\n", c.H1))
-	buf.WriteString(fmt.Sprintf("H2 = %d\n", c.H2))
-	buf.WriteString(fmt.Sprintf("H3 = %d\n", c.H3))
-	buf.WriteString(fmt.Sprintf("H4 = %d\n", c.H4))
+	if !c.IsWireGuard {
+		buf.WriteString(fmt.Sprintf("Jc = %d\n", c.Jc))
+		buf.WriteString(fmt.Sprintf("Jmin = %d\n", c.Jmin))
+		buf.WriteString(fmt.Sprintf("Jmax = %d\n", c.Jmax))
+		buf.WriteString(fmt.Sprintf("S1 = %d\n", c.S1))
+		buf.WriteString(fmt.Sprintf("S2 = %d\n", c.S2))
+		buf.WriteString(fmt.Sprintf("H1 = %d\n", c.H1))
+		buf.WriteString(fmt.Sprintf("H2 = %d\n", c.H2))
+		buf.WriteString(fmt.Sprintf("H3 = %d\n", c.H3))
+		buf.WriteString(fmt.Sprintf("H4 = %d\n", c.H4))
+	}
 	buf.WriteString("\n[Peer]\n")
 	buf.WriteString(fmt.Sprintf("PublicKey = %s\n", c.PublicKey))
 	buf.WriteString(fmt.Sprintf("AllowedIPs = %s\n", c.AllowedIPs))
@@ -128,19 +134,21 @@ func (c *AWGConfig) Save(path string) error {
 	return os.WriteFile(path, buf.Bytes(), 0600)
 }
 
-func (c *AWGConfig) SaveAWGOnly(path string) {
+func (c *AWGConfig) SaveKernelConfig(path string) {
 	var buf bytes.Buffer
 	buf.WriteString("[Interface]\n")
 	buf.WriteString(fmt.Sprintf("PrivateKey = %s\n", c.PrivateKey))
-	buf.WriteString(fmt.Sprintf("Jc = %d\n", c.Jc))
-	buf.WriteString(fmt.Sprintf("Jmin = %d\n", c.Jmin))
-	buf.WriteString(fmt.Sprintf("Jmax = %d\n", c.Jmax))
-	buf.WriteString(fmt.Sprintf("S1 = %d\n", c.S1))
-	buf.WriteString(fmt.Sprintf("S2 = %d\n", c.S2))
-	buf.WriteString(fmt.Sprintf("H1 = %d\n", c.H1))
-	buf.WriteString(fmt.Sprintf("H2 = %d\n", c.H2))
-	buf.WriteString(fmt.Sprintf("H3 = %d\n", c.H3))
-	buf.WriteString(fmt.Sprintf("H4 = %d\n", c.H4))
+	if !c.IsWireGuard {
+		buf.WriteString(fmt.Sprintf("Jc = %d\n", c.Jc))
+		buf.WriteString(fmt.Sprintf("Jmin = %d\n", c.Jmin))
+		buf.WriteString(fmt.Sprintf("Jmax = %d\n", c.Jmax))
+		buf.WriteString(fmt.Sprintf("S1 = %d\n", c.S1))
+		buf.WriteString(fmt.Sprintf("S2 = %d\n", c.S2))
+		buf.WriteString(fmt.Sprintf("H1 = %d\n", c.H1))
+		buf.WriteString(fmt.Sprintf("H2 = %d\n", c.H2))
+		buf.WriteString(fmt.Sprintf("H3 = %d\n", c.H3))
+		buf.WriteString(fmt.Sprintf("H4 = %d\n", c.H4))
+	}
 	buf.WriteString("\n[Peer]\n")
 	buf.WriteString(fmt.Sprintf("PublicKey = %s\n", c.PublicKey))
 	buf.WriteString(fmt.Sprintf("AllowedIPs = %s\n", c.AllowedIPs))
@@ -388,7 +396,7 @@ func awgIP() string {
 	return ""
 }
 
-func findAWGInterface() string {
+func findActiveInterface() string {
 	out, err := sudo(awgBin, "show")
 	if err != nil || out == "" {
 		return ""
@@ -402,13 +410,20 @@ func findAWGInterface() string {
 	return ""
 }
 
-func isAlive(iface string) bool {
-	out, _ := sudo(awgBin, "show", iface)
+func showInterface(iface string) (string, error) {
+	if out, err := sudo(awgBin, "show", iface); err == nil {
+		return out, nil
+	}
+	return sudo(wgBin, "show", iface)
+}
+
+func isInterfaceAlive(iface string) bool {
+	out, _ := showInterface(iface)
 	return len(out) > 0
 }
 
-func pgrepAWG(iface string) []byte {
-	out, _ := exec.Command("pgrep", "-f", "amneziawg-go.*"+iface).Output()
+func pgrepBackground(iface string) []byte {
+	out, _ := exec.Command("pgrep", "-f", "(amneziawg-go|wireguard-go).*"+iface).Output()
 	return out
 }
 
@@ -447,7 +462,7 @@ func updateRoutes(iface, cidrs string) {
 }
 
 func removeAllRoutes() {
-	iface := findAWGInterface()
+	iface := findActiveInterface()
 	if iface == "" {
 		return
 	}
@@ -464,8 +479,8 @@ func cmdUp() string {
 		return "[ERROR] Нет загруженного конфига с Address. Загрузите WireGuard конфиг."
 	}
 	ip := strings.Split(cfg.Address, "/")[0]
-	iface := findAWGInterface()
-	if iface != "" && isAlive(iface) {
+	iface := findActiveInterface()
+	if iface != "" && isInterfaceAlive(iface) {
 		out := fmt.Sprintf("[✓] Найден активный интерфейс %s\n", iface)
 		if routes := loadAllCIDRs(); routes != "" {
 			updateRoutes(iface, routes)
@@ -473,7 +488,7 @@ func cmdUp() string {
 		} else {
 			out += "[!] Нет активных сервисов\n"
 		}
-		so, _ := sudo(awgBin, "show", iface)
+		so, _ := showInterface(iface)
 		out += so
 		return out
 	}
@@ -493,32 +508,52 @@ func cmdUp() string {
 	}
 	iface = freeDev
 
-	awgConf := filepath.Join(configsDir, "._awg_setconf")
-	cfg.SaveAWGOnly(awgConf)
-	defer os.Remove(awgConf)
+	kernConf := filepath.Join(configsDir, "._kern_setconf")
+	cfg.SaveKernelConfig(kernConf)
 
-	// Запускаем amneziawg-go в фоне
+	if cfg.IsWireGuard {
+		startCmd := exec.Command("sudo", "-n", "wireguard-go", iface)
+		startCmd.Stdout = nil
+		startCmd.Stderr = nil
+		startCmd.Start()
+		time.Sleep(2 * time.Second)
+		if !isInterfaceAlive(iface) {
+			return "[ERROR] wireguard-go не запустился на " + iface
+		}
+		sudo("/sbin/ifconfig", iface, ip, ip)
+		cfg.SaveKernelConfig(kernConf)
+		sudo(wgBin, "setconf", iface, kernConf)
+		routes := loadAllCIDRs()
+		if routes != "" {
+			updateRoutes(iface, routes)
+		}
+		saveState(iface, ip)
+		so, _ := showInterface(iface)
+		out := fmt.Sprintf("[✓] WireGuard поднят на %s\n\n%s", iface, so)
+		if routes != "" {
+			out += fmt.Sprintf("\n[✓] Маршруты добавлены (%d подсетей)\n", countCIDRs(routes))
+		}
+		return out
+	}
+	// AWG: amneziawg-go
 	startCmd := exec.Command("sudo", "-n", awgGo, iface)
 	startCmd.Stdout = nil
 	startCmd.Stderr = nil
 	startCmd.Start()
 	time.Sleep(2 * time.Second)
-	if !isAlive(iface) {
-		log, _ := os.ReadFile(fmt.Sprintf("/tmp/awg-%s.log", iface))
-		errMsg := "[ERROR] amneziawg-go не запустился"
-		if len(log) > 0 {
-			errMsg += "\n[log]\n" + string(log)
-		}
-		return errMsg
+	if !isInterfaceAlive(iface) {
+		return "[ERROR] amneziawg-go не запустился на " + iface
 	}
 	sudo("/sbin/ifconfig", iface, ip, ip)
-	sudo(awgBin, "setconf", iface, awgConf)
+	kernConf = filepath.Join(configsDir, "._kern_setconf")
+	cfg.SaveKernelConfig(kernConf)
+	sudo(awgBin, "setconf", iface, kernConf)
 	routes := loadAllCIDRs()
 	if routes != "" {
 		updateRoutes(iface, routes)
 	}
 	saveState(iface, ip)
-	so, _ := sudo(awgBin, "show", iface)
+	so, _ := showInterface(iface)
 	out := fmt.Sprintf("[✓] AmneziaWG поднят на %s\n\n%s", iface, so)
 	if routes != "" {
 		out += fmt.Sprintf("\n[✓] Маршруты добавлены (%d подсетей)\n", countCIDRs(routes))
@@ -535,18 +570,19 @@ func saveState(iface, ip string) { d, _ := json.Marshal(State{iface, ip}); os.Wr
 func clearState() { os.Remove(statePath()) }
 
 func cmdDown() string {
-	iface := findAWGInterface()
+	iface := findActiveInterface()
 	if iface == "" {
 		return "[!] Активный интерфейс не найден"
 	}
 	removeAllRoutes()
-	pids := pgrepAWG(iface)
+	pids := pgrepBackground(iface)
 	if len(pids) > 0 {
 		sudo("kill", "-TERM", strings.TrimSpace(string(pids)))
 		time.Sleep(1 * time.Second)
 		sudo("kill", "-9", strings.TrimSpace(string(pids)))
 	}
 	sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))
+	sudo("rm", "-f", fmt.Sprintf("/var/run/wireguard/%s.sock", iface))
 	clearState()
 	return fmt.Sprintf("[✓] %s опущен", iface)
 }
@@ -561,13 +597,13 @@ func cmdRestart() string {
 }
 
 func cmdShow() string {
-	iface := findAWGInterface()
+	iface := findActiveInterface()
 	if iface == "" {
-		return "[!] AmneziaWG не активен"
+		return "[!] WG/AWG не активен"
 	}
 	var out string
-	out += fmt.Sprintf("=== AmneziaWG (%s) ===\n", iface)
-	if so, err := sudo(awgBin, "show", iface); err == nil {
+	out += fmt.Sprintf("=== %s ===\n", iface)
+	if so, err := showInterface(iface); err == nil {
 		out += so
 	}
 	if io, _ := exec.Command("ifconfig", iface).Output(); len(io) > 0 {
@@ -609,9 +645,9 @@ func cmdShow() string {
 }
 
 func cmdRoutesForce() string {
-	iface := findAWGInterface()
+	iface := findActiveInterface()
 	if iface == "" {
-		return "[!] AmneziaWG не активен. Запустите UP сначала."
+		return "[!] WG/AWG не активен. Запустите UP сначала."
 	}
 	routes := loadAllCIDRs()
 	if routes == "" {
@@ -894,7 +930,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		out := updateAllCIDRs()
 
 		// Переустанавливаем маршруты, если VPN активен
-		if iface := findAWGInterface(); iface != "" {
+		if iface := findActiveInterface(); iface != "" {
 			// Удаляем старые маршруты
 			for _, s := range oldServices {
 				for _, c := range strings.Fields(loadCIDRCache(s)) {
@@ -928,7 +964,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 func showPage(w http.ResponseWriter, output string) {
 	// Определяем статус
-	iface := findAWGInterface()
+	iface := findActiveInterface()
 	hasConfig := getCurrentConfig() != nil
 	vpnActive := iface != ""
 
@@ -987,9 +1023,11 @@ func showPage(w http.ResponseWriter, output string) {
 		if cfg.DNS != "" {
 			buf.WriteString(fmt.Sprintf("DNS = %s\n", cfg.DNS))
 		}
-		buf.WriteString(fmt.Sprintf("Jc = %d\nJmin = %d\nJmax = %d\n", cfg.Jc, cfg.Jmin, cfg.Jmax))
-		buf.WriteString(fmt.Sprintf("S1 = %d\nS2 = %d\n", cfg.S1, cfg.S2))
-		buf.WriteString(fmt.Sprintf("H1 = %d\nH2 = %d\nH3 = %d\nH4 = %d\n", cfg.H1, cfg.H2, cfg.H3, cfg.H4))
+		if !cfg.IsWireGuard {
+			buf.WriteString(fmt.Sprintf("Jc = %d\nJmin = %d\nJmax = %d\n", cfg.Jc, cfg.Jmin, cfg.Jmax))
+			buf.WriteString(fmt.Sprintf("S1 = %d\nS2 = %d\n", cfg.S1, cfg.S2))
+			buf.WriteString(fmt.Sprintf("H1 = %d\nH2 = %d\nH3 = %d\nH4 = %d\n", cfg.H1, cfg.H2, cfg.H3, cfg.H4))
+		}
 		buf.WriteString(fmt.Sprintf("\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\nEndpoint = %s\nPersistentKeepalive = %d\n", cfg.PublicKey, cfg.AllowedIPs, cfg.Endpoint, cfg.PKA))
 		repl["__CONFIG_TEXT__"] = buf.String()
 	}

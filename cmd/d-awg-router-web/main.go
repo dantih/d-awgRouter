@@ -890,9 +890,8 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 
 .config-nav-item{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s;margin-bottom:2px}
 .config-nav-item:hover{background:rgba(255,255,255,0.05)}
-.config-nav-item.active{background:rgba(88,166,255,0.12);color:var(--accent)}
 .config-nav-item .cn-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.config-nav-item .cn-badge{font-size:10px;color:var(--muted)}
+.config-nav-item .cn-badge{font-size:11px;color:var(--accent);margin-left:4px}
 
 /* responsive */
 @media(max-width:640px){
@@ -1011,17 +1010,24 @@ function confirmAction(e) {
 // Config management
 var currentConfig = '__CURRENT_CFG__';
 
+function cfgName(name) {
+  return name.endsWith('.conf') ? name : name + '.conf';
+}
+function cfgDisplay(name) {
+  return name.replace(/\.conf$/,'');
+}
+
 function loadConfig(name) {
-  currentConfig = name;
+  currentConfig = cfgName(name);
   var x = new XMLHttpRequest();
-  x.open('GET', '/api/config/load?name='+encodeURIComponent(name), true);
+  x.open('GET', '/api/config/load?name='+encodeURIComponent(currentConfig), true);
   x.onload = function() {
     var r = JSON.parse(x.responseText);
     if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
-    document.getElementById('config-name').value = r.name;
+    document.getElementById('config-name').value = cfgDisplay(r.name);
     document.getElementById('config-text').value = r.text;
     document.getElementById('btn-del-config').style.display = '';
-    renderConfigNav(name);
+    renderConfigNav();
   };
   x.send();
 }
@@ -1031,22 +1037,23 @@ function saveConfig() {
   var text = document.getElementById('config-text').value;
   if (!name) { showCfgMsg('<span class="error">Enter config name</span>'); return; }
   if (!text) { showCfgMsg('<span class="error">Config is empty</span>'); return; }
+  var oldName = currentConfig; // сохраняем старое имя для переименования
   var x = new XMLHttpRequest();
   x.open('POST', '/api/config/save', true);
   x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
   x.onload = function() {
     var r = JSON.parse(x.responseText);
     if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
-    currentConfig = r.name;
+    currentConfig = cfgName(r.name);
+    document.getElementById('config-name').value = cfgDisplay(currentConfig);
     showCfgMsg('<span class="success">'+r.message+'</span>');
-    renderConfigNav(r.name);
-    updateActiveBadge();
+    renderConfigNav();
   };
-  x.send('name='+encodeURIComponent(name)+'&config='+encodeURIComponent(text));
+  x.send('name='+encodeURIComponent(name)+'&config='+encodeURIComponent(text)+'&old='+encodeURIComponent(oldName));
 }
 
 function deleteConfig() {
-  if (!confirm('Delete config "'+currentConfig+'"?')) return;
+  if (!confirm('Delete config "'+cfgDisplay(currentConfig)+'"?')) return;
   var x = new XMLHttpRequest();
   x.open('POST', '/api/config/delete', true);
   x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
@@ -1058,8 +1065,7 @@ function deleteConfig() {
     document.getElementById('config-name').value = '';
     document.getElementById('config-text').value = '';
     document.getElementById('btn-del-config').style.display = 'none';
-    renderConfigNav('');
-    updateActiveBadge();
+    renderConfigNav();
   };
   x.send('name='+encodeURIComponent(currentConfig));
 }
@@ -1074,8 +1080,8 @@ function activateConfig() {
     var r = JSON.parse(x.responseText);
     if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
     showCfgMsg('<span class="success">'+r.message+'</span>');
-    currentConfig = r.name;
-    renderConfigNav(r.name);
+    currentConfig = cfgName(r.name);
+    renderConfigNav();
   };
   x.send('name='+encodeURIComponent(name));
 }
@@ -1086,20 +1092,19 @@ function newConfig() {
   document.getElementById('btn-del-config').style.display = 'none';
   currentConfig = '';
   showCfgMsg('');
-  renderConfigNav('');
+  renderConfigNav();
 }
 
-function renderConfigNav(active) {
+function renderConfigNav() {
   var x = new XMLHttpRequest();
   x.open('GET', '/api/configs', true);
   x.onload = function() {
     var r = JSON.parse(x.responseText);
     var html = '';
-    if (r.activeBadge) { html = r.activeBadge; }
     for (var i = 0; i < r.configs.length; i++) {
       var c = r.configs[i];
-      var cls = (c.name === active || c.active) ? ' config-nav-item active' : ' config-nav-item';
       var badge = c.active ? ' <span class="cn-badge">●</span>' : '';
+      var cls = 'config-nav-item';
       html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span>'+badge+'</div>';
     }
     document.getElementById('config-list').innerHTML = html;
@@ -1107,9 +1112,8 @@ function renderConfigNav(active) {
   x.send();
 }
 
-function updateActiveBadge() {
-  renderConfigNav(currentConfig);
-}
+// Remove old functions
+var currentConfig = '__CURRENT_CFG__';
 
 function showCfgMsg(msg) {
   document.getElementById('config-msg').innerHTML = msg || '';
@@ -1121,7 +1125,7 @@ function escHtml(s) {
 
 // Initial load: load active config
 window.onload = function() {
-  renderConfigNav(currentConfig);
+  renderConfigNav();
 };
 </script>
 </body></html>`
@@ -1370,8 +1374,9 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 
 	case "/config/save":
 		r.ParseForm()
-		name := r.FormValue("name")
+		name := strings.TrimSpace(r.FormValue("name"))
 		text := r.FormValue("config")
+		old := r.FormValue("old")
 		if name == "" || text == "" {
 			jsonError(w, "name and config required")
 			return
@@ -1383,6 +1388,17 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		if !strings.HasSuffix(name, ".conf") {
 			name += ".conf"
+		}
+		// If name changed, delete old config
+		if old != "" && old != name {
+			if !strings.HasSuffix(old, ".conf") {
+				old += ".conf"
+			}
+			os.Remove(filepath.Join(configsDir, old))
+			// If old was active, update active pointer
+			if getActiveConfigName() == old {
+				saveActiveConfigName(name)
+			}
 		}
 		if err := cfg.Save(filepath.Join(configsDir, name)); err != nil {
 			jsonError(w, fmt.Sprintf("save error: %v", err))

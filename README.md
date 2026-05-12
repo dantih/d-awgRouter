@@ -100,7 +100,7 @@ ssh -L 8765:127.0.0.1:8765 mac
 После установки добавьте в `/etc/sudoers.d/d-awg-router`:
 
 ```
-daniiltikhomirov ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
+YOUR_USER ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
 ```
 
 Либо воспользуйтесь [install.sh](/install/install.sh) — он создаёт sudoers автоматически.

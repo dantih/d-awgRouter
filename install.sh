@@ -104,24 +104,24 @@ if [ -n "$NEED_BREW" ]; then
 fi
 
 # --- Step 1: cache sudo ---
-echo "[1/6] Кэшируем sudo..."
-if sudo -n true 2>/dev/null; then
-    : # already cached
-elif [ -t 0 ]; then
-    # interactive terminal — ask for password
-    echo "  Введи пароль sudo:"
-    sudo -v || { echo "[✗] sudo недоступен"; exit 1; }
-else
-    # piped (curl | bash) — try sudo -A (askpass) or prompt
-    echo "  Нужен пароль sudo. Запусти с флагом SUDO_PASS:"
-    echo "    export SUDO_PASS='твой_пароль' && curl ... | bash"
-    echo ""
-    if [ -n "$SUDO_PASS" ]; then
-        echo "$SUDO_PASS" | sudo -S true 2>/dev/null || { echo "[✗] неверный пароль"; exit 1; }
-    else
-        echo "[✗] sudo требуется пароль. Установи sudoers заранее или запусти скрипт локально."
+echo "[1/6] Кэшируем sudo (спросит пароль)..."
+# Read password directly from /dev/tty even when piped
+if ! sudo -n true 2>/dev/null; then
+    echo -n "  Пароль sudo: "
+    stty -echo < /dev/tty 2>/dev/null || true
+    read -r SUDO_PASS < /dev/tty 2>/dev/null || {
+        echo ""
+        echo "[✗] Нет доступа к терминалу. Запусти скрипт локально:"
+        echo "    ./install.sh"
         exit 1
     }
+    stty echo < /dev/tty 2>/dev/null || true
+    echo ""
+    echo "$SUDO_PASS" | sudo -S true 2>/dev/null || {
+        echo "[✗] Неверный пароль"
+        exit 1
+    }
+    unset SUDO_PASS
 fi
 
 # Keep sudo alive in background

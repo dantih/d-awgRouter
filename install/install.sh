@@ -36,10 +36,14 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done 2>
 # --- Step 2: download binary ---
 echo "[2/6] Скачиваем $NAME из GitHub Releases..."
 TMP_BIN=$(mktemp)
-if curl -sfL -o "$TMP_BIN" "$RELEASE_URL"; then
+echo -n "  ⏳ Загрузка... "
+HTTP_CODE=$(curl -fL --progress-bar -o "$TMP_BIN" "$RELEASE_URL" 2>&1 | tail -1) || true
+if [ -s "$TMP_BIN" ] && file "$TMP_BIN" | grep -qi "Mach-O"; then
     chmod +x "$TMP_BIN"
-    echo "  ✓ Скачан: $RELEASE_URL"
+    SIZE=$(du -h "$TMP_BIN" | cut -f1)
+    echo "✓ $SIZE"
 else
+    echo "✗ Ошибка!"
     echo "[✗] Не удалось скачать бинарник с $RELEASE_URL"
     echo "    Проверь: https://github.com/$REPO/releases"
     rm -f "$TMP_BIN"
@@ -68,8 +72,11 @@ mkdir -p "$CONFIG_DIR"/{configs,cache,routes,state}
 # Download icon from GitHub
 ICON_DST="$CONFIG_DIR/awg-icon.png"
 ICON_URL="https://raw.githubusercontent.com/$REPO/main/assets/awg-icon-big.png"
+echo -n "  ⏳ Иконка... "
 if curl -sfL -o "$ICON_DST" "$ICON_URL"; then
-    echo "  ✓ Иконка скачана"
+    echo "✓"
+else
+    echo "— (не критично)"
 fi
 
 # Set icon on binary via fileicon

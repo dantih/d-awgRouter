@@ -1,0 +1,15 @@
+# Files
+
+bin/d-awg-router-web-darwin-arm64
+
+# IDEs & tools
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+/tmp/
+
+# macOS
+.DS_Store

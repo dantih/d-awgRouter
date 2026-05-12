@@ -104,8 +104,25 @@ if [ -n "$NEED_BREW" ]; then
 fi
 
 # --- Step 1: cache sudo ---
-echo "[1/6] Кэшируем sudo (потребуется пароль)..."
-sudo -v || { echo "[✗] sudo недоступен"; exit 1; }
+echo "[1/6] Кэшируем sudo..."
+if sudo -n true 2>/dev/null; then
+    : # already cached
+elif [ -t 0 ]; then
+    # interactive terminal — ask for password
+    echo "  Введи пароль sudo:"
+    sudo -v || { echo "[✗] sudo недоступен"; exit 1; }
+else
+    # piped (curl | bash) — try sudo -A (askpass) or prompt
+    echo "  Нужен пароль sudo. Запусти с флагом SUDO_PASS:"
+    echo "    export SUDO_PASS='твой_пароль' && curl ... | bash"
+    echo ""
+    if [ -n "$SUDO_PASS" ]; then
+        echo "$SUDO_PASS" | sudo -S true 2>/dev/null || { echo "[✗] неверный пароль"; exit 1; }
+    else
+        echo "[✗] sudo требуется пароль. Установи sudoers заранее или запусти скрипт локально."
+        exit 1
+    }
+fi
 
 # Keep sudo alive in background
 while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &

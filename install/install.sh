@@ -67,6 +67,15 @@ elif [ -f "awg-icon.png" ]; then
     echo "  ✓ Иконка скопирована"
 fi
 
+# Set icon on binary via fileicon
+if [ -f "$ICON_DST" ] && command -v fileicon &>/dev/null; then
+    echo "  ✓ Устанавливаем иконку на бинарник..."
+    fileicon set "$BIN_DEST" "$ICON_DST" 2>/dev/null || true
+elif [ -f "$ICON_DST" ] && [ -x /opt/homebrew/bin/fileicon ]; then
+    echo "  ✓ Устанавливаем иконку на бинарник..."
+    /opt/homebrew/bin/fileicon set "$BIN_DEST" "$ICON_DST" 2>/dev/null || true
+fi
+
 # --- Step 5: launchd plist ---
 echo "[5/5] Устанавливаем launchd plist → $PLIST_DEST"
 

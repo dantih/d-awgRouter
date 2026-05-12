@@ -45,7 +45,7 @@ echo "YOUR_PASSWORD" | sudo -S mv /tmp/d-awg-router-web /usr/local/bin/d-awg-rou
 ### Или через install.sh
 
 ```bash
-curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install/install.sh | bash
+curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh | bash
 ```
 
 ### Настройка launchd
@@ -127,7 +127,7 @@ ssh -L 8765:127.0.0.1:8765 mac
 YOUR_USER ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
 ```
 
-Либо воспользуйтесь [install.sh](/install/install.sh) — он создаёт sudoers автоматически.
+Либо воспользуйтесь [install.sh](install.sh) — он создаёт sudoers автоматически.
 
 ## Сборка
 

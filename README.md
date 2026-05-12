@@ -44,7 +44,7 @@ echo "YOUR_PASSWORD" | sudo -S mv /tmp/d-awg-router-web /usr/local/bin/d-awg-rou
 ### Or via install.sh
 
 ```bash
-curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install/install.sh | bash
+curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh | bash
 ```
 
 ### launchd setup
@@ -126,7 +126,7 @@ After installation, add to `/etc/sudoers.d/d-awg-router`:
 YOUR_USER ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
 ```
 
-Or use [install.sh](/install/install.sh) — it creates sudoers automatically.
+Or use [install.sh](install.sh) — it creates sudoers automatically.
 
 ## Build
 

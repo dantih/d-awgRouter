@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -x
 
 NAME="d-awg-router-web"
 BIN_DEST="/usr/local/bin/$NAME"
@@ -32,64 +33,66 @@ echo "[0/6] Проверяем зависимости..."
 BREW_BIN="/opt/homebrew/bin/brew"
 NEED_BREW=""
 
+find_bin() {
+    local name="$1"
+    local paths="$2"
+    for p in $paths; do
+        if [ -x "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    command -v "$name" 2>/dev/null
+}
+
 check_dep() {
     local name="$1"
     local brew_pkg="$2"
     local paths="$3"
-    local found=""
-    for p in $paths; do
-        if [ -x "$p" ]; then
-            found="$p"
-            break
-        fi
-    done
-    if [ -z "$found" ]; then
-        if command -v "$name" &>/dev/null; then
-            found="$(command -v "$name")"
-        fi
-    fi
-    if [ -z "$found" ]; then
-        echo "  ⚠ $name не найден"
-        if [ -n "$brew_pkg" ]; then
-            NEED_BREW="$NEED_BREW $brew_pkg"
-        fi
-        return 1
-    else
+    local found=$(find_bin "$name" "$paths")
+    if [ -n "$found" ]; then
         echo "  ✓ $name: $found"
         return 0
     fi
+    echo "  ⚠ $name не найден"
+    if [ -n "$brew_pkg" ]; then
+        NEED_BREW="$NEED_BREW $brew_pkg"
+    fi
 }
 
-check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg" || true
-check_dep "wireguard-go" "wireguard-go" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go" || true
-check_dep "awg" "" "/usr/local/bin/awg" || true
-check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go" || true
+check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg"
+check_dep "wireguard-go" "wireguard-go" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go"
+check_dep "awg" "" "/usr/local/bin/awg"
+check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
 
-# Install missing brew packages (non-interactive if piped, ask otherwise)
+# Install missing brew packages
 if [ -n "$NEED_BREW" ]; then
-    INSTALL_ALL=false
-    if [ ! -t 0 ]; then
-        # piped (curl | bash) — install without asking
-        INSTALL_ALL=true
-    fi
     echo ""
     echo "  Не хватает: $NEED_BREW"
     if [ -x "$BREW_BIN" ]; then
-        if [ "$INSTALL_ALL" = false ]; then
+        INSTALL=false
+        if [ -t 0 ]; then
             echo -n "  Установить через Homebrew? [Y/n] "
             read -r answer
-            if [ -n "$answer" ] && [ "$answer" != "y" ] && [ "$answer" != "Y" ] && [ "$answer" != "yes" ]; then
-                echo "  ⚠ Пропускаем установку пакетов."
-                INSTALL_ALL=false
-            else
-                INSTALL_ALL=true
-            fi
+            case "$answer" in
+                ""|y|Y|yes) INSTALL=true ;;
+                *) echo "  ⚠ Пропускаем." ;;
+            esac
+        else
+            echo "  Устанавливаю (curl | bash)..."
+            INSTALL=true
         fi
-        if [ "$INSTALL_ALL" = true ]; then
+        if [ "$INSTALL" = true ]; then
             eval "$($BREW_BIN shellenv)"
             for pkg in $NEED_BREW; do
                 echo -n "  → brew install $pkg... "
-                brew install "$pkg" 2>/dev/null && echo "✓" || echo "✗"
+                if brew install "$pkg"; then
+                    echo "✓"
+                    # Re-check paths after install
+                    WG_CHECK=$(ls /opt/homebrew/bin/wg /opt/homebrew/bin/wireguard-go /usr/local/bin/wg 2>/dev/null || true)
+                else
+                    echo "✗"
+                fi
             done
         fi
     else
@@ -97,8 +100,8 @@ if [ -n "$NEED_BREW" ]; then
         for pkg in $NEED_BREW; do
             echo "    brew install $pkg"
         done
-        echo ""
     fi
+    echo ""
 fi
 
 # --- Step 1: cache sudo ---

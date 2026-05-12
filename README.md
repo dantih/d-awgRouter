@@ -1,54 +1,53 @@
 # d-awgRouter
 
-🌐 **[English](README.en.md)** | **Русский** ↓
+> 🌐 **[Русский](README.ru.md)** | **English** ↓
 
- — веб-сервис для управления **WireGuard / AmneziaWG VPN** на macOS: загрузка конфигов, динамический выбор маршрутов из GitHub (RockBlack-VPN/ip-address), управление интерфейсом.
+**d-awgRouter** — a web service for managing **WireGuard / AmneziaWG VPN** on macOS: config management, dynamic route selection from GitHub (RockBlack-VPN/ip-address), interface control.
 
-Автоматически определяет тип конфига — обычный WireGuard или AmneziaWG — по наличию параметров `Jc`/`Jmin`/`Jmax` в конфиге.
+Automatically detects config type — regular WireGuard or AmneziaWG — by checking for `Jc`/`Jmin`/`Jmax` parameters.
 
-Поддерживает несколько конфигураций, мультиязычный интерфейс (EN / RU), понятный веб-интерфейс.
+Supports multiple configurations, multi-language UI (EN / RU), clean web interface.
 
-## Как это работает
+## How it works
 
 ```
-пользователь → веб-интерфейс (127.0.0.1:8765) → Go binary (sudo -n)
-                                              ├── AmneziaWG: awg + amneziawg-go
-                                              └── WireGuard: wg + wireguard-go
+user → web interface (127.0.0.1:8765) → Go binary (sudo -n)
+                                       ├── AmneziaWG: awg + amneziawg-go
+                                       └── WireGuard: wg + wireguard-go
 ```
 
-Маршруты (CIDR-подсети) для разных сервисов (Telegram, YouTube, Netflix и т.д.) загружаются из [RockBlack-VPN/ip-address](https://github.com/RockBlack-VPN/ip-address). Выбираешь нужные — они добавляются на VPN-интерфейс.
+Routes (CIDR subnets) for various services (Telegram, YouTube, Netflix, etc.) are fetched from [RockBlack-VPN/ip-address](https://github.com/RockBlack-VPN/ip-address). Pick the ones you need — they get added to the VPN interface.
 
-## Структура папок
+## Directory structure
 
 ```
 ~/.d-awg-router/
-├── configs/*.conf            # все загруженные WireGuard/AWG конфиги
-├── active                    # имя активного конфига
-├── cache/<Service>.cidr      # кэшированные CIDR (по файлу на сервис)
-├── routes/<Service>          # пустой файл = сервис включён
-├── state/current             # состояние (интерфейс, IP)
-├── lang                      # выбранный язык (en / ru)
-└── awg-icon.png              # иконка сервиса
+├── configs/*.conf            # all saved WireGuard/AWG configs
+├── active                    # active config name
+├── cache/<Service>.cidr      # cached CIDRs (one file per service)
+├── routes/<Service>          # empty file = service enabled
+├── state/current             # state (interface, IP)
+├── lang                      # selected language (en / ru)
+└── awg-icon.png              # service icon
 ```
 
-## Быстрый старт
+## Quick start
 
-### Установка из release
+### Install from release
 
 ```bash
-# Скачать последнюю версию
 curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
 chmod +x /tmp/d-awg-router-web
 echo "YOUR_PASSWORD" | sudo -S mv /tmp/d-awg-router-web /usr/local/bin/d-awg-router-web
 ```
 
-### Или через install.sh
+### Or via install.sh
 
 ```bash
 curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install/install.sh | bash
 ```
 
-### Настройка launchd
+### launchd setup
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
@@ -81,77 +80,77 @@ EOF
 launchctl load ~/Library/LaunchAgents/com.d-awg-router.web.plist
 ```
 
-### Использование
+### Usage
 
 ```bash
-# Открыть в браузере (через SSH-туннель)
+# Open in browser (via SSH tunnel)
 ssh -L 8765:127.0.0.1:8765 mac
 
-# В браузере:
-# 1. Config → вставить WireGuard или AmneziaWG конфиг → Save
-# 2. Config → Activate (чтобы сделать активным)
-# 3. Services → выбрать нужные (Telegram, YouTube, ...) → Save Selection
+# In browser:
+# 1. Config → paste WireGuard or AmneziaWG config → Save
+# 2. Config → Activate (to make it active)
+# 3. Services → select needed ones (Telegram, YouTube, ...) → Save Selection
 # 4. Control → UP
 ```
 
-## Веб-интерфейс
+## Web interface
 
-Три вкладки:
+Three tabs:
 
-| Вкладка | Назначение |
-|---------|------------|
-| **Control** | ВКЛ / ВЫКЛ / Перезапуск VPN, просмотр статуса и маршрутов |
-| **Services** | Выбор CIDR-сервисов для роутинга через VPN |
-| **Config** | Список конфигураций, редактор, создание/удаление/активация |
+| Tab | Purpose |
+|-----|---------|
+| **Control** | UP / DOWN / Restart VPN, status & routes view |
+| **Services** | Select CIDR services to route through VPN |
+| **Config** | Config list, editor, create/delete/activate |
 
-В хедере — переключатель языка (English / Русский).
+Language selector in the header (English / Русский).
 
-## Требования
+## Requirements
 
-### Для AmneziaWG
+### For AmneziaWG
 - macOS (Apple Silicon)
-- [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) бинарник
+- [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) binary
 - [awg](https://github.com/amnezia-vpn/amneziawg-tools) (amneziawg-tools)
 
-### Для обычного WireGuard
+### For regular WireGuard
 - [wireguard-go](https://www.wireguard.com/) — `brew install wireguard-go`
 - [wireguard-tools](https://www.wireguard.com/) — `brew install wireguard-tools`
 
-Бинарники `wg` и `wireguard-go` должны быть в PATH (или в `/opt/homebrew/bin/`).
+`wg` and `wireguard-go` binaries must be in PATH (or in `/opt/homebrew/bin/`).
 
 ### sudoers
 
-После установки добавьте в `/etc/sudoers.d/d-awg-router`:
+After installation, add to `/etc/sudoers.d/d-awg-router`:
 
 ```
 YOUR_USER ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
 ```
 
-Либо воспользуйтесь [install.sh](/install/install.sh) — он создаёт sudoers автоматически.
+Or use [install.sh](/install/install.sh) — it creates sudoers automatically.
 
-## Сборка
+## Build
 
 ```bash
 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o d-awg-router-web-darwin-arm64 ./cmd/d-awg-router-web/
 ```
 
-## Автоопределение типа VPN
+## Config detection
 
-Система автоматически определяет тип конфига:
+The system automatically detects config type:
 
-| Флаг | AmneziaWG | WireGuard |
+| Flag | AmneziaWG | WireGuard |
 |------|-----------|-----------|
-| `Jc` | ✅ есть | ❌ нет |
-| `Jmin` | ✅ есть | ❌ нет |
-| `Jmax` | ✅ есть | ❌ нет |
-| Бекенд | `amneziawg-go` | `wireguard-go` |
-| Инструменты | `awg` | `wg` |
+| `Jc` | ✅ yes | ❌ no |
+| `Jmin` | ✅ yes | ❌ no |
+| `Jmax` | ✅ yes | ❌ no |
+| Backend | `amneziawg-go` | `wireguard-go` |
+| Tools | `awg` | `wg` |
 
-## Мультиязычность
+## Internationalization
 
-Языковые строки вынесены в `cmd/d-awg-router-web/lang.go`. Чтобы добавить новый язык:
+Language strings are in `cmd/d-awg-router-web/lang.go`. To add a new language:
 
-1. Добавь блок в `langData`:
+1. Add a block to `langData`:
 ```go
 "fr": LangMap{
     "btn.up": "MONTER",
@@ -159,15 +158,15 @@ GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o d-awg-router-web-darwin-ar
     // ...
 },
 ```
-2. Обнови селектор в HTML (добавь `<option value="fr">Français</option>`)
-3. Пересобери
+2. Update the HTML selector (add `<option value="fr">Français</option>`)
+3. Rebuild
 
-IP-адреса, имена интерфейсов и сырые конфиги — всегда на английском.
+IP addresses, interface names and raw config content — always in English.
 
-## Безопасность
+## Security
 
-- Сервис слушает только на `127.0.0.1:8765` (локальный доступ)
-- Весь доступ к админским командам — через SSH-туннель или локально
-- `sudo -n` через строгий `/etc/sudoers.d/d-awg-router` (только разрешённые команды)
-- WireGuard приватные ключи хранятся в `~/.d-awg-router/configs/` с правами 0600
-- Конфиги VPN не хранятся в git-истории
+- Service listens only on `127.0.0.1:8765` (local access only)
+- All admin access via SSH tunnel or locally
+- `sudo -n` via strict `/etc/sudoers.d/d-awg-router` (whitelisted commands only)
+- WireGuard private keys stored in `~/.d-awg-router/configs/` with 0600 permissions
+- VPN configs are never stored in git history

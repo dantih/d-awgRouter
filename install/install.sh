@@ -26,6 +26,66 @@ echo "  d-awg-router-web Installer"
 echo "=============================="
 echo ""
 
+# --- Step 0: check dependencies ---
+echo "[0/6] Проверяем зависимости..."
+
+BREW_BIN="/opt/homebrew/bin/brew"
+NEED_BREW=""
+
+check_dep() {
+    local name="$1"
+    local brew_pkg="$2"
+    local paths="$3"
+    local found=""
+    for p in $paths; do
+        if [ -x "$p" ]; then
+            found="$p"
+            break
+        fi
+    done
+    if [ -z "$found" ]; then
+        if command -v "$name" &>/dev/null; then
+            found="$(command -v "$name")"
+        fi
+    fi
+    if [ -z "$found" ]; then
+        echo "  ⚠ $name не найден"
+        if [ -n "$brew_pkg" ]; then
+            NEED_BREW="$NEED_BREW $brew_pkg"
+        fi
+        return 1
+    else
+        echo "  ✓ $name: $found"
+        return 0
+    fi
+}
+
+check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg"
+check_dep "wireguard-go" "wireguard-go" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go"
+check_dep "awg" "" "/usr/local/bin/awg"
+check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
+
+# Install missing brew packages
+if [ -n "$NEED_BREW" ]; then
+    echo ""
+    echo "  Нужно установить через Homebrew: $NEED_BREW"
+    if [ -x "$BREW_BIN" ]; then
+        echo -n "  Устанавливаю... "
+        eval "$($BREW_BIN shellenv)"
+        for pkg in $NEED_BREW; do
+            echo -n "$pkg... "
+            brew install "$pkg" 2>/dev/null || true
+        done
+        echo "✓"
+    else
+        echo "  ⚠ Homebrew не найден. Установи вручную:"
+        for pkg in $NEED_BREW; do
+            echo "    brew install $pkg"
+        done
+        echo ""
+    fi
+fi
+
 # --- Step 1: cache sudo ---
 echo "[1/6] Кэшируем sudo (потребуется пароль)..."
 sudo -v || { echo "[✗] sudo недоступен"; exit 1; }

@@ -1,6 +1,5 @@
 #!/bin/bash
 set -e
-set -x
 
 NAME="d-awg-router-web"
 BIN_DEST="/usr/local/bin/$NAME"
@@ -61,7 +60,7 @@ check_dep() {
 }
 
 check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg"
-check_dep "wireguard-go" "wireguard-go" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go"
+check_dep "wireguard-go" "" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go"
 check_dep "awg" "" "/usr/local/bin/awg"
 check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
 

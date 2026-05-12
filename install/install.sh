@@ -52,12 +52,34 @@ echo "$SUDOERS_LINE" | sudo tee "$SUDOERS_FILE" > /dev/null
 sudo chmod 440 "$SUDOERS_FILE"
 echo "  ✓ Разрешены: awg, amneziawg-go, route, ifconfig, kill, rm, pgrep, wg, wireguard-go"
 
-# --- Step 4: directory structure ---
+# --- Step 4: directory structure + icon ---
 echo "[4/5] Создаём ~/.d-awg-router/{configs,cache,routes,state}"
 mkdir -p "$CONFIG_DIR"/{configs,cache,routes,state}
 
+# Copy icon if present
+ICON_SRC="assets/icon.png"
+ICON_DST="$CONFIG_DIR/awg-icon.png"
+if [ -f "$ICON_SRC" ]; then
+    cp "$ICON_SRC" "$ICON_DST"
+    echo "  ✓ Иконка скопирована"
+elif [ -f "awg-icon.png" ]; then
+    cp "awg-icon.png" "$ICON_DST"
+    echo "  ✓ Иконка скопирована"
+fi
+
 # --- Step 5: launchd plist ---
 echo "[5/5] Устанавливаем launchd plist → $PLIST_DEST"
+
+ICON_PLIST=""
+if [ -f "$CONFIG_DIR/awg-icon.png" ]; then
+    ICON_PLIST="    <key>Nice</key>
+    <integer>0</integer>
+    <key>LSUIElement</key>
+    <true/>
+    <key>CFBundleIconFile</key>
+    <string>$CONFIG_DIR/awg-icon.png</string>
+"
+fi
 
 cat > /tmp/com.d-awg-router.web.plist << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -80,7 +102,7 @@ cat > /tmp/com.d-awg-router.web.plist << PLIST
     <string>/tmp/$PLIST_LABEL.log</string>
     <key>StandardErrorPath</key>
     <string>/tmp/$PLIST_LABEL.err</string>
-</dict>
+${ICON_PLIST:-}</dict>
 </plist>
 PLIST
 

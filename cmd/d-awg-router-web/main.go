@@ -28,6 +28,7 @@ var (
 	cacheDir   string
 	routesDir  string
 	stateDir   string
+	activeCfg  string // имя активного конфига
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
@@ -197,19 +198,62 @@ func listConfigs() []string {
 	return names
 }
 
+func activeConfigPath() string {
+	return filepath.Join(awgDir, "active")
+}
+
+func getActiveConfigName() string {
+	data, err := os.ReadFile(activeConfigPath())
+	if err != nil {
+		return "telegram.conf"
+	}
+	name := strings.TrimSpace(string(data))
+	if _, err := os.Stat(filepath.Join(configsDir, name)); err != nil {
+		return "telegram.conf"
+	}
+	return name
+}
+
+func saveActiveConfigName(name string) {
+	os.WriteFile(activeConfigPath(), []byte(name), 0644)
+}
+
 func getCurrentConfig() *AWGConfig {
-	// Сначала telegram.conf, потом любой другой
-	cfg, err := loadConfig("telegram.conf")
-	if err == nil && cfg.Address != "" {
+	name := getActiveConfigName()
+	cfg, err := loadConfig(name)
+	if err != nil {
+		// fallback: telegram.conf
+		cfg, err = loadConfig("telegram.conf")
+	}
+	if err == nil && cfg != nil && cfg.Address != "" {
 		return cfg
 	}
 	// fallback: любой конфиг с Address
-	for _, name := range listConfigs() {
-		if cfg, err := loadConfig(name); err == nil && cfg.Address != "" {
+	for _, n := range listConfigs() {
+		if cfg, err := loadConfig(n); err == nil && cfg.Address != "" {
+			saveActiveConfigName(n)
 			return cfg
 		}
 	}
 	return nil
+}
+
+func saveConfig(name, data string) error {
+	cfg, err := parseWGConfig(data)
+	if err != nil {
+		return err
+	}
+	if !strings.HasSuffix(name, ".conf") {
+		name += ".conf"
+	}
+	return cfg.Save(filepath.Join(configsDir, name))
+}
+
+func deleteConfig(name string) error {
+	if !strings.HasSuffix(name, ".conf") {
+		name += ".conf"
+	}
+	return os.Remove(filepath.Join(configsDir, name))
 }
 
 // === CIDR Services ===
@@ -844,6 +888,12 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 .warning{color:#d29922}
 .info{color:var(--muted)}
 
+.config-nav-item{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s;margin-bottom:2px}
+.config-nav-item:hover{background:rgba(255,255,255,0.05)}
+.config-nav-item.active{background:rgba(88,166,255,0.12);color:var(--accent)}
+.config-nav-item .cn-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.config-nav-item .cn-badge{font-size:10px;color:var(--muted)}
+
 /* responsive */
 @media(max-width:640px){
   .tabs{overflow-x:auto}
@@ -918,16 +968,22 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 
 <!-- Tab: Config -->
 <div id="tab-config" class="tab-content">
-  <div class="card flat">
-    <h2>WireGuard Config</h2>
-    <form method="post">
-      <textarea class="config" name="config" placeholder="[Interface]&#10;Address = ...&#10;PrivateKey = ...">__CONFIG_TEXT__</textarea>
-      <div class="flex mt mb">
-        <button class="btn btn-save" name="cmd" value="save-config">Save Config</button>
-        <button class="btn btn-show" name="cmd" value="show-config">Show Current</button>
+  <div class="card flat" style="display:flex;gap:16px;flex-wrap:wrap">
+    <div style="min-width:180px;flex-shrink:0">
+      <h2>Confi­gurations</h2>
+      <div id="config-list" style="margin-bottom:10px">__CONFIG_LIST__</div>
+      <button class="btn btn-sm btn-save" onclick="newConfig()">+ New</button>
+    </div>
+    <div style="flex:1;min-width:280px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <input type="text" id="config-name" value="__CONFIG_NAME__" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--fg);font-size:13px;flex:1;min-width:120px">
+        <button class="btn btn-sm btn-save" onclick="saveConfig()">Save</button>
+        <button class="btn btn-sm btn-restart" onclick="activateConfig()">Activate</button>
+        <button class="btn btn-sm btn-down" onclick="deleteConfig()" id="btn-del-config">Delete</button>
       </div>
-    </form>
-    __CONFIG_SAVED__
+      <textarea class="config" id="config-text" style="min-height:200px" placeholder="[Interface]&#10;Address = ...&#10;PrivateKey = ...">__CONFIG_TEXT__</textarea>
+      <div id="config-msg" class="mt" style="font-size:13px">__CONFIG_MSG__</div>
+    </div>
   </div>
 </div>
 
@@ -951,6 +1007,122 @@ function confirmAction(e) {
   if (v==="restart") return confirm("Restart VPN?");
   return true;
 }
+
+// Config management
+var currentConfig = '__CURRENT_CFG__';
+
+function loadConfig(name) {
+  currentConfig = name;
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/config/load?name='+encodeURIComponent(name), true);
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
+    document.getElementById('config-name').value = r.name;
+    document.getElementById('config-text').value = r.text;
+    document.getElementById('btn-del-config').style.display = '';
+    renderConfigNav(name);
+  };
+  x.send();
+}
+
+function saveConfig() {
+  var name = document.getElementById('config-name').value.trim();
+  var text = document.getElementById('config-text').value;
+  if (!name) { showCfgMsg('<span class="error">Enter config name</span>'); return; }
+  if (!text) { showCfgMsg('<span class="error">Config is empty</span>'); return; }
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/config/save', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
+    currentConfig = r.name;
+    showCfgMsg('<span class="success">'+r.message+'</span>');
+    renderConfigNav(r.name);
+    updateActiveBadge();
+  };
+  x.send('name='+encodeURIComponent(name)+'&config='+encodeURIComponent(text));
+}
+
+function deleteConfig() {
+  if (!confirm('Delete config "'+currentConfig+'"?')) return;
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/config/delete', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
+    showCfgMsg('<span class="success">'+r.message+'</span>');
+    currentConfig = '';
+    document.getElementById('config-name').value = '';
+    document.getElementById('config-text').value = '';
+    document.getElementById('btn-del-config').style.display = 'none';
+    renderConfigNav('');
+    updateActiveBadge();
+  };
+  x.send('name='+encodeURIComponent(currentConfig));
+}
+
+function activateConfig() {
+  var name = document.getElementById('config-name').value.trim();
+  if (!name) return;
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/config/activate', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showCfgMsg('<span class="error">'+r.error+'</span>'); return; }
+    showCfgMsg('<span class="success">'+r.message+'</span>');
+    currentConfig = r.name;
+    renderConfigNav(r.name);
+  };
+  x.send('name='+encodeURIComponent(name));
+}
+
+function newConfig() {
+  document.getElementById('config-name').value = '';
+  document.getElementById('config-text').value = '';
+  document.getElementById('btn-del-config').style.display = 'none';
+  currentConfig = '';
+  showCfgMsg('');
+  renderConfigNav('');
+}
+
+function renderConfigNav(active) {
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/configs', true);
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    var html = '';
+    if (r.activeBadge) { html = r.activeBadge; }
+    for (var i = 0; i < r.configs.length; i++) {
+      var c = r.configs[i];
+      var cls = (c.name === active || c.active) ? ' config-nav-item active' : ' config-nav-item';
+      var badge = c.active ? ' <span class="cn-badge">●</span>' : '';
+      html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span>'+badge+'</div>';
+    }
+    document.getElementById('config-list').innerHTML = html;
+  };
+  x.send();
+}
+
+function updateActiveBadge() {
+  renderConfigNav(currentConfig);
+}
+
+function showCfgMsg(msg) {
+  document.getElementById('config-msg').innerHTML = msg || '';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Initial load: load active config
+window.onload = function() {
+  renderConfigNav(currentConfig);
+};
 </script>
 </body></html>`
 }
@@ -964,7 +1136,21 @@ func render(w http.ResponseWriter, replacements map[string]string) {
 	fmt.Fprint(w, p)
 }
 
+func respondJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+func jsonError(w http.ResponseWriter, msg string) {
+	respondJSON(w, map[string]string{"error": msg})
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
+	// API routes
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		handleAPI(w, r)
+		return
+	}
 	if r.Method == http.MethodGet {
 		showPage(w, "")
 		return
@@ -977,22 +1163,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	cmd := r.FormValue("cmd")
 
 	switch cmd {
-	case "save-config":
-		text := r.FormValue("config")
-		if text == "" {
-			showPage(w, `<span class="error">Empty config</span>`)
-			return
-		}
-		cfg, err := parseWGConfig(text)
-		if err != nil {
-			showPage(w, fmt.Sprintf(`<span class="error">%v</span>`, err))
-			return
-		}
-		if err := cfg.Save(filepath.Join(configsDir, "telegram.conf")); err != nil {
-			showPage(w, fmt.Sprintf(`<span class="error">Save error: %v</span>`, err))
-			return
-		}
-		showPage(w, `<span class="success">Config saved to telegram.conf</span>`)
 	case "save-services":
 		// Запоминаем старые сервисы до очистки
 		oldServices := loadRoutes()
@@ -1091,8 +1261,11 @@ func showPage(w http.ResponseWriter, output string) {
 
 	repl := map[string]string{
 		"__OUTPUT__":        output,
-		"__CONFIG_SAVED__":  "",
+		"__CONFIG_MSG__":    "",
 		"__CONFIG_TEXT__":   "",
+		"__CONFIG_NAME__":   "",
+		"__CONFIG_LIST__":   "",
+		"__CURRENT_CFG__":   "",
 		"__STATUS_DOT__":    statusDot,
 		"__STATUS_TEXT__":   statusText,
 		"__INTERFACE__":     ifaceStr,
@@ -1102,8 +1275,9 @@ func showPage(w http.ResponseWriter, output string) {
 		"__RESTART_DISABLED__": restartDisabled,
 		"__ROUTES_DISABLED__":  routesDisabled,
 	}
-	// Заполняем конфиг
-	if cfg := getCurrentConfig(); cfg != nil {
+	// Заполняем активный конфиг
+	cfgName := getActiveConfigName()
+	if cfg, err := loadConfig(cfgName); err == nil && cfg != nil && cfg.Address != "" {
 		var buf bytes.Buffer
 		buf.WriteString(fmt.Sprintf("[Interface]\nAddress = %s\nPrivateKey = %s\n", cfg.Address, cfg.PrivateKey))
 		if cfg.DNS != "" {
@@ -1116,6 +1290,8 @@ func showPage(w http.ResponseWriter, output string) {
 		}
 		buf.WriteString(fmt.Sprintf("\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\nEndpoint = %s\nPersistentKeepalive = %d\n", cfg.PublicKey, cfg.AllowedIPs, cfg.Endpoint, cfg.PKA))
 		repl["__CONFIG_TEXT__"] = buf.String()
+		repl["__CONFIG_NAME__"] = strings.TrimSuffix(cfgName, ".conf")
+		repl["__CURRENT_CFG__"] = cfgName
 	}
 
 	// Заполняем сервисы
@@ -1149,6 +1325,119 @@ func htmlEsc(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
+}
+
+func handleAPI(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api")
+	path = strings.TrimSuffix(path, "/")
+
+	switch path {
+	case "/configs":
+		configs := listConfigs()
+		active := getActiveConfigName()
+		type ci struct {
+			Name    string `json:"name"`
+			Display string `json:"display"`
+			Active  bool   `json:"active"`
+		}
+		items := make([]ci, 0, len(configs))
+		for _, n := range configs {
+			display := strings.TrimSuffix(n, ".conf")
+			items = append(items, ci{
+				Name: n, Display: display, Active: n == active,
+			})
+		}
+		respondJSON(w, map[string]interface{}{
+			"configs": items,
+			"active":  active,
+		})
+
+	case "/config/load":
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		data, err := os.ReadFile(filepath.Join(configsDir, name))
+		if err != nil {
+			jsonError(w, fmt.Sprintf("not found: %v", err))
+			return
+		}
+		respondJSON(w, map[string]string{
+			"name": name,
+			"text": string(data),
+		})
+
+	case "/config/save":
+		r.ParseForm()
+		name := r.FormValue("name")
+		text := r.FormValue("config")
+		if name == "" || text == "" {
+			jsonError(w, "name and config required")
+			return
+		}
+		cfg, err := parseWGConfig(text)
+		if err != nil {
+			jsonError(w, err.Error())
+			return
+		}
+		if !strings.HasSuffix(name, ".conf") {
+			name += ".conf"
+		}
+		if err := cfg.Save(filepath.Join(configsDir, name)); err != nil {
+			jsonError(w, fmt.Sprintf("save error: %v", err))
+			return
+		}
+		respondJSON(w, map[string]string{
+			"message": fmt.Sprintf("Saved %s", strings.TrimSuffix(name, ".conf")),
+			"name":    name,
+		})
+
+	case "/config/delete":
+		r.ParseForm()
+		name := r.FormValue("name")
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		if !strings.HasSuffix(name, ".conf") {
+			name += ".conf"
+		}
+		if err := os.Remove(filepath.Join(configsDir, name)); err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err))
+			return
+		}
+		// Если удаляем активный — сбрасываем на telegram.conf
+		if getActiveConfigName() == name {
+			saveActiveConfigName("telegram.conf")
+		}
+		respondJSON(w, map[string]string{
+			"message": fmt.Sprintf("Deleted %s", strings.TrimSuffix(name, ".conf")),
+		})
+
+	case "/config/activate":
+		r.ParseForm()
+		name := r.FormValue("name")
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		if !strings.HasSuffix(name, ".conf") {
+			name += ".conf"
+		}
+		if _, err := os.Stat(filepath.Join(configsDir, name)); err != nil {
+			jsonError(w, fmt.Sprintf("not found: %s", name))
+			return
+		}
+		saveActiveConfigName(name)
+		respondJSON(w, map[string]string{
+			"message": fmt.Sprintf("Activated %s", strings.TrimSuffix(name, ".conf")),
+			"name":    name,
+		})
+
+	default:
+		jsonError(w, "unknown API endpoint")
+	}
 }
 
 func iconHandler(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -x
 
 NAME="d-awg-router-web"
 BIN_DEST="/usr/local/bin/$NAME"
@@ -85,8 +86,10 @@ if [ -n "$NEED_BREW" ]; then
             eval "$($BREW_BIN shellenv)"
             for pkg in $NEED_BREW; do
                 echo -n "  → brew install $pkg... "
-                if brew install "$pkg" 2>/dev/null; then
+                if brew install "$pkg"; then
                     echo "✓"
+                    # Re-check paths after install
+                    WG_CHECK=$(ls /opt/homebrew/bin/wg /opt/homebrew/bin/wireguard-go /usr/local/bin/wg 2>/dev/null || true)
                 else
                     echo "✗"
                 fi

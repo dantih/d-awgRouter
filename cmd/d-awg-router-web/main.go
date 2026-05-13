@@ -837,12 +837,17 @@ func cmdDown() string {
 }
 
 func cmdRestart() string {
-	out := cmdDown()
+	// Clear output by building from scratch
+	var out string
+	out = "--- Restarting ---\n\n"
+	out += cmdDown()
 	if strings.Contains(out, "[ERROR]") {
 		return out
 	}
 	time.Sleep(1 * time.Second)
-	return out + "\n" + cmdUp()
+	out += "\n"
+	out += cmdUp()
+	return out
 }
 
 func cmdShow() string {
@@ -1341,11 +1346,27 @@ function renderUserRoutesNav() {
       var badge = u.active ? ' <span class="cn-badge">●</span>' : '';
       var cls = 'config-nav-item';
       if (u.name === currentUserRoute) cls += ' active';
-      html += '<div class="'+cls+'" onclick="loadUserRoute(\''+escHtml(u.name).replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(u.name)+'</span>'+badge+'</div>';
+      html += '<div class="'+cls+'">'
+        + '<span class="cn-name" onclick="loadUserRoute(\''+escHtml(u.name).replace(/'/g,"\\'")+'\')">'+escHtml(u.name)+'</span>'
+        + badge
+        + '<label style="font-size:11px;color:var(--muted);cursor:pointer;margin-right:4px" onclick="event.stopPropagation()">'
+        + '<input type="checkbox" style="width:14px;height:14px;cursor:pointer" '+(u.active?'checked':'')+' onchange="toggleUserRoute(\''+escHtml(u.name).replace(/'/g,"\\'")+'\', this.checked)">'
+        + '</label>'
+        + '</div>';
     }
     document.getElementById('user-routes-list').innerHTML = html;
   };
   x.send();
+}
+
+function toggleUserRoute(name, active) {
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/user-route/toggle', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() {
+    renderUserRoutesNav();
+  };
+  x.send('name='+encodeURIComponent(name)+'&active='+(active?'1':'0'));
 }
 
 function loadUserRoute(name) {
@@ -1359,7 +1380,7 @@ function loadUserRoute(name) {
     if (r.error) { showUrMsg('<span class="error">'+r.error+'</span>'); return; }
     document.getElementById('ur-name').value = r.name;
     document.getElementById('ur-cidrs').value = r.cidrs.join('\n');
-    document.getElementById('ur-active').checked = r.active;
+                    //
     renderUserRoutesNav();
   };
   x.send();
@@ -1542,6 +1563,10 @@ func showPage(w http.ResponseWriter, output string) {
 			if strings.Contains(line, iface) {
 				routeCount++
 			}
+		}
+		// subtract default route (0.0.0.0/1 via tun)
+		if routeCount > 0 {
+			routeCount--
 		}
 		routesStr = fmt.Sprintf("%d routes", routeCount)
 		if loadAllCIDRs() != "" {

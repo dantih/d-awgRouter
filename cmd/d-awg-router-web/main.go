@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -1002,6 +1003,11 @@ label.service{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:poi
 label.service:hover{background:rgba(255,255,255,0.05)}
 label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 .service-count{font-size:11px;color:var(--muted);margin-left:auto}
+.svc-label{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s}
+.svc-label:hover{background:rgba(255,255,255,0.05)}
+.svc-label input{margin:0;width:16px;height:16px;cursor:pointer}
+.svc-link{color:var(--fg);text-decoration:none;flex:1}
+.svc-link:hover{color:var(--accent);text-decoration:underline}
 
 .error{color:#f85149}
 .success{color:#3fb950}
@@ -1600,16 +1606,20 @@ func showPage(w http.ResponseWriter, output string) {
 	for _, s := range active {
 		am[s] = true
 	}
+	// Сортируем по имени
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
 	var svcHTML strings.Builder
 	if len(services) == 0 {
 		svcHTML.WriteString(`<span class="error">` + tr("s.github_unavail") + `</span>`)
 	} else {
+		repoBase := "https://github.com/RockBlack-VPN/ip-address/tree/main/Global"
 		for _, s := range services {
 			checked := ""
 			if am[s.Name] {
 				checked = " checked"
 			}
-			svcHTML.WriteString(fmt.Sprintf(`<label><input type="checkbox" name="service" value="%s"%s>%s</label>`, htmlEsc(s.Name), checked, htmlEsc(s.Name)))
+			htmlName := htmlEsc(s.Name)
+			svcHTML.WriteString(fmt.Sprintf(`<label class="svc-label"><input type="checkbox" name="service" value="%s"%s><a class="svc-link" href="%s/%s" target="_blank">%s</a></label>`, htmlName, checked, repoBase, htmlEsc(url.PathEscape(s.Name)), htmlName))
 		}
 	}
 		repl["__SERVICES__"] = svcHTML.String()

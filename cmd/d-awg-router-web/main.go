@@ -580,6 +580,7 @@ func removeAllRoutes() {
 }
 
 func wireguardUp(cfg *AWGConfig) string {
+	cfgName := getActiveConfigName()
 	ip := strings.Split(cfg.Address, "/")[0]
 
 	// Ищем свободный utun (6 занят штатным WG)
@@ -628,7 +629,7 @@ func wireguardUp(cfg *AWGConfig) string {
 
 	saveState(iface, ip)
 	so, _ := showInterface(iface)
-	out := fmt.Sprintf("[✓] "+tr("s.wg_up", iface)+"\n\n%s", so)
+	out := fmt.Sprintf("[✓] [%s] "+tr("s.wg_up", iface)+"\n\n%s", cfgName, so)
 	if routes != "" {
 		out += fmt.Sprintf("\n[✓] %s (%d %s)\n", tr("s.updated"), countCIDRs(routes), tr("s.nets"))
 	}
@@ -636,6 +637,7 @@ func wireguardUp(cfg *AWGConfig) string {
 }
 
 func amneziawgUp(cfg *AWGConfig) string {
+	cfgName := getActiveConfigName()
 	ip := strings.Split(cfg.Address, "/")[0]
 
 	// Свободный utun (не utun6)
@@ -682,7 +684,7 @@ func amneziawgUp(cfg *AWGConfig) string {
 
 	saveState(iface, ip)
 	so, _ := showInterface(iface)
-	out := fmt.Sprintf("[✓] "+tr("s.awg_up", iface)+"\n\n%s", so)
+	out := fmt.Sprintf("[✓] [%s] "+tr("s.awg_up", iface)+"\n\n%s", cfgName, so)
 	if routes != "" {
 		out += fmt.Sprintf("\n[✓] %s (%d %s)\n", tr("s.updated"), countCIDRs(routes), tr("s.nets"))
 	}
@@ -744,7 +746,7 @@ func cmdDown() string {
 	sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))
 	sudo("rm", "-f", fmt.Sprintf("/var/run/wireguard/%s.sock", iface))
 	clearState()
-	return fmt.Sprintf("[✓] %s %s", iface, tr("s.down_iface"))
+	return fmt.Sprintf("[✓] [%s] %s %s", getActiveConfigName(), iface, tr("s.down_iface"))
 }
 
 func cmdRestart() string {

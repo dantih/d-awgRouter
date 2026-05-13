@@ -2047,42 +2047,41 @@ func ensurePlist() {
 }
 
 func statusService() {
-	fmt.Println("=== d-awg-router status ===")
-	fmt.Println()
+	fmt.Println("")
+	fmt.Println("  d-awg-router", appVersion)
+	fmt.Println("  " + strings.Repeat("─", 40))
+	fmt.Println("")
 
 	out, err := exec.Command("launchctl", "list", "com.d-awg-router.web").Output()
 	if err != nil {
-		fmt.Println("| Service: not running")
+		fmt.Println("  Service:  stopped")
 	} else {
 		lines := strings.Split(string(out), "\n")
 		if len(lines) > 0 {
 			parts := strings.Fields(lines[0])
 			if len(parts) >= 3 && parts[1] == "0" {
-				fmt.Printf("| Service: running (PID %s)\n", parts[0])
+				fmt.Printf("  Service:  RUNNING  (PID %s)\n", parts[0])
 			} else if len(parts) >= 3 {
-				fmt.Printf("| Service: exited with code %s\n", parts[1])
+				fmt.Printf("  Service:  exited (%s)\n", parts[1])
 			}
 		}
 	}
 
-	fmt.Printf("| Version: %s\n", getVersion())
-
 	if iface := findActiveInterface(); iface != "" {
-		fmt.Println("| VPN: active on", iface)
+		fmt.Println("  VPN:      active  (" + iface + ")")
+
+		cfgName := getActiveConfigName()
+		fmt.Println("  Config:   " + cfgName)
+
 		cidrs := loadAllCIDRs()
 		if count := countCIDRs(cidrs); count > 0 {
-			fmt.Printf("| Routes: %d loaded\n", count)
+			fmt.Printf("  Routes:   %d loaded\n", count)
 		} else {
-			fmt.Println("| Routes: none configured")
-		}
-		if cfg := getCurrentConfig(); cfg != nil {
-			fmt.Println("| Config:", cfg.Name)
-		} else {
-			fmt.Println("| Config: none")
+			fmt.Println("  Routes:   none configured")
 		}
 	} else {
-		fmt.Println("| VPN: inactive")
-		fmt.Println("| Routes: none (VPN down)")
+		fmt.Println("  VPN:      inactive")
+		fmt.Println("  Routes:   none (VPN down)")
 	}
 
 	users := loadUserRoutes()
@@ -2093,10 +2092,10 @@ func statusService() {
 		}
 	}
 	if len(users) > 0 {
-		fmt.Printf("| Custom routes: %d total, %d active\n", len(users), activeUsers)
+		fmt.Printf("  Custom:   %d routes (%d active)\n", len(users), activeUsers)
 	} else {
-		fmt.Println("| Custom routes: none")
+		fmt.Println("  Custom:   none")
 	}
 
-	fmt.Println()
+	fmt.Println("")
 }

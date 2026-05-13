@@ -1114,13 +1114,13 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 <div id="tab-control" class="tab-content active">
   <div class="card">
     <h2>__L_TAB_CONTROL__</h2>
-    <div class="flex">
-      <button class="btn btn-up" id="btn-up" onclick="doCmd('up', '__L_BTN_UP__')" __UP_DISABLED__>__L_BTN_UP__</button>
-      <button class="btn btn-down" id="btn-down" onclick="doCmd('down', '__L_BTN_DOWN__')" __DOWN_DISABLED__>__L_BTN_DOWN__</button>
-      <button class="btn btn-restart" id="btn-restart" onclick="doCmd('restart', '__L_BTN_RSTRT__')" __RESTART_DISABLED__>__L_BTN_RSTRT__</button>
-      <button class="btn btn-show" id="btn-show" onclick="doCmd('show', 'SHOW')">SHOW</button>
-      <button class="btn btn-routes" id="btn-routes" onclick="doCmd('routes-force', 'ROUTES')" __ROUTES_DISABLED__>ROUTES</button>
-    </div>
+    <form method="post" class="flex" onsubmit="return confirmAction(event)">
+      <button class="btn btn-up" name="cmd" value="up" id="btn-up" __UP_DISABLED__>__L_BTN_UP__</button>
+      <button class="btn btn-down" name="cmd" value="down" id="btn-down" __DOWN_DISABLED__>__L_BTN_DOWN__</button>
+      <button class="btn btn-restart" name="cmd" value="restart" id="btn-restart" __RESTART_DISABLED__>__L_BTN_RESTART__</button>
+      <button class="btn btn-show" name="cmd" value="show">SHOW</button>
+      <button class="btn btn-routes" name="cmd" value="routes-force" id="btn-routes" __ROUTES_DISABLED__>ROUTES</button>
+    </form>
   </div>
   <div class="card">
     <h2>__L_OUTPUT__</h2>
@@ -1202,40 +1202,16 @@ document.addEventListener("click", function(e) {
   document.getElementById("tab-"+name).classList.add("active");
 });
 
-function doCmd(cmd, label) {
-  if (cmd==="down" && !confirm("__L_CONFIRM_DOWN__")) return;
-  if (cmd==="restart" && !confirm("__L_CONFIRM_RESTART__")) return;
+function confirmAction(e) {
+  var v = e.submitter.value;
   showSpinner('output');
-  var x = new XMLHttpRequest();
-  x.open('POST', '/', true);
-  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
-  x.onload = function() {
-    // Parse HTML response and extract output
-    var html = x.responseText;
-    var m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-    if (m) {
-      document.getElementById('output').innerHTML = '<pre>'+m[1]+'</pre>';
-    } else {
-      document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText.substring(0,2000))+'</pre>';
-    }
-    // Also update status bar
-    updateStatusBar();
-  };
-  x.send('cmd='+encodeURIComponent(cmd));
+  if (v==="down" && !confirm("__L_CONFIRM_DOWN__")) { document.getElementById('output').innerHTML = '<pre></pre>'; return false; }
+  if (v==="restart" && !confirm("__L_CONFIRM_RESTART__")) { document.getElementById('output').innerHTML = '<pre></pre>'; return false; }
+  return true;
 }
 
 function showSpinner(id) {
   document.getElementById(id).innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
-}
-
-function updateStatusBar() {
-  var x = new XMLHttpRequest();
-  x.open('GET', '/', true);
-  x.onload = function() {
-    // Refresh page by extracting parts... or just reload
-    location.reload();
-  };
-  x.send();
 }
 
 // Config management

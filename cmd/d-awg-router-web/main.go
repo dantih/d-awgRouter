@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1999,13 +2000,26 @@ func main() {
 		}
 		return
 	}
+	if !tryListen() {
+		return
+	}
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/icon", iconHandler)
 	addr := fmt.Sprintf("%s:%s", host, port)
 	println("d-awg-router-web on", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		panic(err)
+		println(err.Error())
 	}
+}
+
+func tryListen() bool {
+	addr := fmt.Sprintf("%s:%s", host, port)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	l.Close()
+	return true
 }
 
 func launchctl(action string) {

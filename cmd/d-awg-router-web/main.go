@@ -2047,20 +2047,56 @@ func ensurePlist() {
 }
 
 func statusService() {
+	fmt.Println("=== d-awg-router status ===")
+	fmt.Println()
+
 	out, err := exec.Command("launchctl", "list", "com.d-awg-router.web").Output()
 	if err != nil {
-		fmt.Println("Service not running")
-		return
-	}
-	lines := strings.Split(string(out), "\n")
-	if len(lines) > 0 {
-		parts := strings.Fields(lines[0])
-		if len(parts) >= 3 && parts[1] == "0" {
-			fmt.Println("Service is running (PID:", parts[0]+")")
-		} else if len(parts) >= 3 {
-			fmt.Println("Service exited with code:", parts[1])
-		} else {
-			fmt.Println("Status:", string(out))
+		fmt.Println("| Service: not running")
+	} else {
+		lines := strings.Split(string(out), "\n")
+		if len(lines) > 0 {
+			parts := strings.Fields(lines[0])
+			if len(parts) >= 3 && parts[1] == "0" {
+				fmt.Printf("| Service: running (PID %s)\n", parts[0])
+			} else if len(parts) >= 3 {
+				fmt.Printf("| Service: exited with code %s\n", parts[1])
+			}
 		}
 	}
+
+	fmt.Printf("| Version: %s\n", getVersion())
+
+	if iface := findActiveInterface(); iface != "" {
+		fmt.Println("| VPN: active on", iface)
+		cidrs := loadAllCIDRs()
+		if count := countCIDRs(cidrs); count > 0 {
+			fmt.Printf("| Routes: %d loaded\n", count)
+		} else {
+			fmt.Println("| Routes: none configured")
+		}
+		if cfg := getCurrentConfig(); cfg != nil {
+			fmt.Println("| Config:", cfg.Name)
+		} else {
+			fmt.Println("| Config: none")
+		}
+	} else {
+		fmt.Println("| VPN: inactive")
+		fmt.Println("| Routes: none (VPN down)")
+	}
+
+	users := loadUserRoutes()
+	activeUsers := 0
+	for _, u := range users {
+		if u.Active {
+			activeUsers++
+		}
+	}
+	if len(users) > 0 {
+		fmt.Printf("| Custom routes: %d total, %d active\n", len(users), activeUsers)
+	} else {
+		fmt.Println("| Custom routes: none")
+	}
+
+	fmt.Println()
 }

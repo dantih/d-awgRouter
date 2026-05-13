@@ -1138,7 +1138,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
       <div class="grid">__SERVICES__</div>
       <div class="flex mt">
         <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
-        <button class="btn btn-routes" onclick="fetchCmd('update-cidr')">__L_BTN_LOAD__</button>
+        <button class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>
       </div>
     </form>
   </div>
@@ -1205,28 +1205,25 @@ document.addEventListener("click", function(e) {
 function fetchCmd(url) {
   document.getElementById('output').innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
   var x = new XMLHttpRequest();
-  x.open('POST', '/', true);
-  x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+  x.open('GET', url, true);
   x.onload = function() {
-    var html = x.responseText;
-    var m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-    if (m) { document.getElementById('output').innerHTML = '<pre>'+m[1]+'</pre>'; }
-    setTimeout(function(){ window.location.reload(); }, 400);
+    document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText)+'</pre>';
+    setTimeout(function(){ window.location.reload(); }, 600);
   };
-  x.send('cmd='+encodeURIComponent(url));
+  x.send();
 }
 
-function cmdUp() { fetchCmd('up'); }
+function cmdUp() { fetchCmd('/api/up'); }
 function cmdDown() {
   if (!confirm("__L_CONFIRM_DOWN__")) return;
-  fetchCmd('down');
+  fetchCmd('/api/down');
 }
 function cmdRestart() {
   if (!confirm("__L_CONFIRM_RESTART__")) return;
-  fetchCmd('restart');
+  fetchCmd('/api/restart');
 }
-function cmdShow() { fetchCmd('show'); }
-function cmdRoutes() { fetchCmd('routes-force'); }
+function cmdShow() { fetchCmd('/api/show'); }
+function cmdRoutes() { fetchCmd('/api/routes-force'); }
 
 // Config management
 var currentConfig = '__CURRENT_CFG__';
@@ -1250,7 +1247,7 @@ function loadConfig(name) {
     document.getElementById('btn-del-config').style.display = '';
     renderConfigNav();
   };
-  x.send('cmd='+encodeURIComponent(url));
+  x.send();
 }
 
 function saveConfig() {
@@ -1329,7 +1326,7 @@ function renderConfigNav() {
     }
     document.getElementById('config-list').innerHTML = html;
   };
-  x.send('cmd='+encodeURIComponent(url));
+  x.send();
 }
 
 // Remove old functions
@@ -1379,7 +1376,7 @@ function renderUserRoutesNav() {
     }
     document.getElementById('user-routes-list').innerHTML = html;
   };
-  x.send('cmd='+encodeURIComponent(url));
+  x.send();
 }
 
 function toggleUserRoute(name, active) {
@@ -1406,7 +1403,7 @@ function loadUserRoute(name) {
                     //
     renderUserRoutesNav();
   };
-  x.send('cmd='+encodeURIComponent(url));
+  x.send();
 }
 
 function saveUserRoute() {
@@ -1484,7 +1481,22 @@ func jsonError(w http.ResponseWriter, msg string) {
 func handler(w http.ResponseWriter, r *http.Request) {
 	// API routes
 	if strings.HasPrefix(r.URL.Path, "/api/") {
-		handleAPI(w, r)
+		switch strings.TrimPrefix(r.URL.Path, "/api") {
+		case "/up":
+			w.Write([]byte(cmdUp()))
+		case "/down":
+			w.Write([]byte(cmdDown()))
+		case "/restart":
+			w.Write([]byte(cmdRestart()))
+		case "/show":
+			w.Write([]byte(cmdShow()))
+		case "/routes-force":
+			w.Write([]byte(cmdRoutesForce()))
+		case "/update-cidr":
+			w.Write([]byte(updateAllCIDRs()))
+		default:
+			handleAPI(w, r)
+		}
 		return
 	}
 	if r.Method == http.MethodGet {

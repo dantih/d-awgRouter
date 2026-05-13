@@ -1204,12 +1204,29 @@ document.addEventListener("click", function(e) {
 });
 
 function fetchCmd(url) {
-  document.getElementById('output').innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
+  var dots = 0;
+  document.getElementById('output').innerHTML = '<pre>Executing';
+  var d = setInterval(function(){
+    dots++;
+    document.getElementById('output').innerHTML = '<pre>Executing'+Array(dots+1).join('.');
+  }, 300);
   var x = new XMLHttpRequest();
   x.open('GET', url, true);
   x.onload = function() {
+    clearInterval(d);
     document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText)+'</pre>';
-    setTimeout(function(){ window.location.reload(); }, 600);
+    var s = new XMLHttpRequest();
+    s.open('GET', '/api/status', true);
+    s.onload = function() {
+      try {
+        var st = JSON.parse(s.responseText);
+        document.getElementById('status-dot').className = 'status-dot '+(st.vpnActive?'green':'red');
+        document.getElementById('status-text').textContent = st.vpnActive ? '__L_STATUS_ONLINE__' : '__L_STATUS_OFFLINE__';
+        document.getElementById('iface-text').textContent = st.interface;
+        document.getElementById('routes-text').textContent = st.routeCount + ' routes';
+      } catch(e){}
+    };
+    s.send();
   };
   x.send();
 }

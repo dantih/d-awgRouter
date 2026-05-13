@@ -1050,6 +1050,13 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 .info{color:var(--muted)}
 
 .config-nav-item{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s;margin-bottom:2px}
+
+/* Activity spinner */
+.spinner{display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px;color:var(--muted)}
+.spinner-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:spd 0.8s ease-in-out infinite}
+.spinner-dot:nth-child(2){animation-delay:0.15s}
+.spinner-dot:nth-child(3){animation-delay:0.3s}
+@keyframes spd{0\%,80\%,100\%{opacity:0.3;transform:scale(0.8)}40\%{opacity:1;transform:scale(1.2)}}
 .config-nav-item:hover{background:rgba(255,255,255,0.05)}
 .config-nav-item.active{background:rgba(88,166,255,0.12)}
 .config-nav-item .cn-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1197,9 +1204,14 @@ document.addEventListener("click", function(e) {
 
 function confirmAction(e) {
   var v = e.submitter.value;
-  if (v==="down") return confirm("__L_CONFIRM_DOWN__");
-  if (v==="restart") return confirm("__L_CONFIRM_RESTART__");
+  if (v==="down") { if (!confirm("__L_CONFIRM_DOWN__")) return false; showSpinner(); return true; }
+  if (v==="restart") { if (!confirm("__L_CONFIRM_RESTART__")) return false; showSpinner(); return true; }
+  if (v==="up" || v==="routes-force" || v==="show" || v==="update-cidr") { showSpinner(); return true; }
   return true;
+}
+
+function showSpinner() {
+  document.getElementById('output').innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
 }
 
 // Config management

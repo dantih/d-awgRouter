@@ -846,53 +846,83 @@ func cmdRestart() string {
 }
 
 func cmdShow() string {
-	iface := findActiveInterface()
-	if iface == "" {
-		return "[!] " + tr("s.none_active")
-	}
 	var out string
-	out += fmt.Sprintf("=== %s ===\n", iface)
-	if so, err := showInterface(iface); err == nil {
-		out += so
-	}
-	if io, _ := exec.Command("ifconfig", iface).Output(); len(io) > 0 {
-		out += "\n=== Интерфейс ===\n"
-		for _, line := range strings.Split(string(io), "\n") {
-			if strings.HasPrefix(line, iface) || strings.Contains(line, "inet ") {
-				out += line + "\n"
+	// Show active config
+	cfgName := getActiveConfigName()
+	if cfgName == "" {
+		out += "[!] No config selected\n"
+	} else {
+		data, err := os.ReadFile(filepath.Join(configsDir, cfgName))
+		if err != nil {
+			out += fmt.Sprintf("[!] Config %s not found: %v\n", cfgName, err)
+		} else {
+			out += fmt.Sprintf("=== %s ===\n", cfgName)
+			out += string(data)
+			if !strings.HasSuffix(string(data), "\n") {
+				out += "\n"
 			}
 		}
 	}
-	out += "\n" + tr("s.output_routes") + "\n"
-	routes := loadRoutes()
-	if len(routes) == 0 {
-		out += "  " + tr("s.no_services") + "\n"
-	} else {
-		routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
-		rt := strings.Split(string(routeOut), "\n")
-		for _, s := range routes {
-			cidrData := loadCIDRCache(s)
-			cnt := countCIDRs(cidrData)
-			ok := 0
-			for _, c := range strings.Fields(cidrData) {
-				net := strings.Split(c, "/")[0]
-				for _, r := range rt {
-					if strings.Contains(r, iface) && strings.Contains(r, strings.Split(net, ".")[0]+"."+strings.Split(net, ".")[1]) {
-						ok++
-						break
+	// Interface status
+	iface := findActiveInterface()
+	if iface != "" {
+		out += fmt.Sprintf("\n=== Interface: %s ===\n", iface)
+		if so, err := showInterface(iface); err == nil {
+			out += so
+		}
+		out += "\n" + tr("s.output_routes") + "\n"
+		routes := loadRoutes()
+		allCIDRs := loadAllCIDRs()
+		if len(routes) == 0 && loadActiveUserCIDRs() == "" {
+			out += "  " + tr("s.no_services") + "\n"
+		} else {
+			routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
+			rt := strings.Split(string(routeOut), "\n")
+			for _, s := range routes {
+				cidrData := loadCIDRCache(s)
+				cnt := countCIDRs(cidrData)
+				ok := 0
+				for _, c := range strings.Fields(cidrData) {
+					net := strings.Split(c, "/")[0]
+					for _, r := range rt {
+						if strings.Contains(r, iface) && strings.Contains(r, strings.Split(net, ".")[0]+"."+strings.Split(net, ".")[1]) {
+							ok++
+							break
+						}
 					}
 				}
+				sym := "[\u2713]"
+				if ok < cnt {
+					sym = "[\u2717]"
+				}
+				out += fmt.Sprintf("  %s %s (%d/%d)\n", sym, s, ok, cnt)
 			}
-			sym := "[✓]"
-			if ok < cnt {
-				sym = "[✗]"
+			for _, u := range loadUserRoutes() {
+				if !u.Active {
+					continue
+				}
+				cnt := len(u.CIDRs)
+				ok := 0
+				for _, c := range u.CIDRs {
+					net := strings.Split(c, "/")[0]
+					for _, r := range rt {
+						if strings.Contains(r, iface) && strings.Contains(r, strings.Split(net, ".")[0]+"."+strings.Split(net, ".")[1]) {
+							ok++
+							break
+						}
+					}
+				}
+				sym := "[\u2713]"
+				if ok < cnt {
+					sym = "[\u2717]"
+				}
+				out += fmt.Sprintf("  %s %s (custom, %d/%d)\n", sym, u.Name, ok, cnt)
 			}
-			out += fmt.Sprintf("  %s %s (%d/%d)\n", sym, s, ok, cnt)
 		}
+		out += "\n---\nTotal CIDRs: " + fmt.Sprintf("%d", countCIDRs(allCIDRs)) + "\n"
 	}
 	return out
 }
-
 func cmdRoutesForce() string {
 	iface := findActiveInterface()
 	if iface == "" {
@@ -1112,9 +1142,6 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
       <div style="flex:1;min-width:260px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
           <input type="text" id="ur-name" value="" placeholder="Route name" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--fg);font-size:13px;flex:1;min-width:120px">
-          <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="checkbox" id="ur-active" checked> Active
-          </label>
           <button class="btn btn-sm btn-save" onclick="saveUserRoute()">Save</button>
           <button class="btn btn-sm btn-down" onclick="deleteUserRoute()" id="btn-del-ur" style="display:none">Delete</button>
         </div>
@@ -1341,7 +1368,6 @@ function loadUserRoute(name) {
 function saveUserRoute() {
   var name = document.getElementById('ur-name').value.trim();
   var raw = document.getElementById('ur-cidrs').value;
-  var active = document.getElementById('ur-active').checked;
   if (!name) { showUrMsg('<span class="error">Enter route name</span>'); return; }
   var lines = raw.split('\n').filter(function(l){return l.trim()!==''});
   var x = new XMLHttpRequest();
@@ -1354,7 +1380,7 @@ function saveUserRoute() {
     showUrMsg('<span class="success">'+r.message+'</span>');
     renderUserRoutesNav();
   };
-  x.send('name='+encodeURIComponent(name)+'&cidrs='+encodeURIComponent(lines.join('\n'))+'&active='+(active?'1':'0')+(currentUserRoute&&currentUserRoute!==name?'&old='+encodeURIComponent(currentUserRoute):''));
+  x.send('name='+encodeURIComponent(name)+'&cidrs='+encodeURIComponent(lines.join('\n'))+(currentUserRoute&&currentUserRoute!==name?'&old='+encodeURIComponent(currentUserRoute):''));
   currentUserRoute = name;
 }
 
@@ -1370,7 +1396,6 @@ function deleteUserRoute() {
     currentUserRoute = '';
     document.getElementById('ur-name').value = '';
     document.getElementById('ur-cidrs').value = '';
-    document.getElementById('ur-active').checked = true;
     document.getElementById('btn-del-ur').style.display = 'none';
     showUrMsg('<span class="success">'+r.message+'</span>');
     renderUserRoutesNav();
@@ -1631,7 +1656,12 @@ func showPage(w http.ResponseWriter, output string) {
 		if u.Active {
 			badge = `<span class="cn-badge">&#9679;</span>`
 		}
-		urHTML.WriteString(fmt.Sprintf(`<div class="config-nav-item" onclick="loadUserRoute('%s')"><span class="cn-name">%s</span>%s</div>`, htmlEsc(u.Name), htmlEsc(u.Name), badge))
+		activeChecked := ""
+		if u.Active {
+			activeChecked = " checked"
+		}
+		nameEsc := htmlEsc(u.Name)
+		urHTML.WriteString(fmt.Sprintf(`<div class="config-nav-item"><span class="cn-name" onclick="loadUserRoute('%s')">%s</span>%s<label style="font-size:11px;color:var(--muted);cursor:pointer;margin-right:4px" onclick="event.stopPropagation()"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"%s onchange="toggleUserRoute('%s', this.checked)"></label></div>`, nameEsc, nameEsc, badge, activeChecked, nameEsc))
 	}
 	repl["__USER_ROUTES_LIST__"] = urHTML.String()
 
@@ -1845,6 +1875,32 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			updateUserRoutesOnInterface(iface)
 		}
 		respondJSON(w, map[string]string{"message": "Route deleted"})
+
+	case "/user-route/toggle":
+		r.ParseForm()
+		name := r.FormValue("name")
+		active := r.FormValue("active") == "1"
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		for _, u := range loadUserRoutes() {
+			if u.Name == name {
+				saveUserRoute(name, u.CIDRs, active)
+				if iface := findActiveInterface(); iface != "" {
+					if active {
+						updateRoutes(iface, strings.Join(u.CIDRs, " "))
+					} else {
+						for _, c := range u.CIDRs {
+							sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
+						}
+					}
+				}
+				respondJSON(w, map[string]string{"message": "OK"})
+				return
+			}
+		}
+		jsonError(w, "route not found")
 
 	default:
 		jsonError(w, "unknown API endpoint")

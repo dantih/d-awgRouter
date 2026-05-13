@@ -1428,7 +1428,6 @@ function newUserRoute() {
   currentUserRoute = '';
   document.getElementById('ur-name').value = '';
   document.getElementById('ur-cidrs').value = '';
-  document.getElementById('ur-active').checked = true;
   document.getElementById('btn-del-ur').style.display = 'none';
   showUrMsg('');
   renderUserRoutesNav();

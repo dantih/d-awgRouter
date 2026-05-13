@@ -27,6 +27,7 @@ var (
 	configsDir string
 	cacheDir   string
 	routesDir  string
+	userRoutesDir string
 	stateDir   string
 	activeCfg  string // имя активного конфига
 	langName   string // текущий язык "en" или "ru"
@@ -79,8 +80,9 @@ func init() {
 	configsDir = filepath.Join(awgDir, "configs")
 	cacheDir = filepath.Join(awgDir, "cache")
 	routesDir = filepath.Join(awgDir, "routes")
+	userRoutesDir = filepath.Join(awgDir, "routes", "user")
 	stateDir = filepath.Join(awgDir, "state")
-	for _, d := range []string{configsDir, cacheDir, routesDir, stateDir} {
+	for _, d := range []string{configsDir, cacheDir, routesDir, userRoutesDir, stateDir} {
 		os.MkdirAll(d, 0755)
 	}
 	// Загрузка версии (из ~/.d-awg-router/version.txt с фолбэком на version.txt рядом с бинарником)
@@ -461,6 +463,9 @@ func loadAllCIDRs() string {
 			all = append(all, d)
 		}
 	}
+	if userCIDRs := loadActiveUserCIDRs(); userCIDRs != "" {
+		all = append(all, userCIDRs)
+	}
 	return strings.Join(all, " ")
 }
 
@@ -485,6 +490,87 @@ func setRoute(name string, active bool) {
 	} else {
 		os.Remove(p)
 	}
+}
+
+// === User Routes ===
+
+type UserRoute struct {
+	Name   string   `json:"name"`
+	CIDRs  []string `json:"cidrs"`
+	Active bool     `json:"active"`
+}
+
+func userRoutePath(name string) string {
+	return filepath.Join(userRoutesDir, name+".json")
+}
+
+func loadUserRoutes() []UserRoute {
+	entries, err := os.ReadDir(userRoutesDir)
+	if err != nil {
+		return nil
+	}
+	var routes []UserRoute
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(userRoutesDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var r UserRoute
+		if json.Unmarshal(data, &r) != nil || r.Name == "" {
+			continue
+		}
+		r.Name = strings.TrimSuffix(e.Name(), ".json")
+		routes = append(routes, r)
+	}
+	sort.Slice(routes, func(i, j int) bool { return routes[i].Name < routes[j].Name })
+	return routes
+}
+
+func saveUserRoute(name string, cidrs []string, active bool) {
+	// Валидация CIDR
+	var valid []string
+	for _, c := range cidrs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		valid = append(valid, c)
+	}
+	r := UserRoute{Name: name, CIDRs: valid, Active: active}
+	data, _ := json.MarshalIndent(r, "", "  ")
+	os.WriteFile(userRoutePath(name), data, 0644)
+}
+
+func deleteUserRoute(name string) {
+	os.Remove(userRoutePath(name))
+}
+
+func loadActiveUserCIDRs() string {
+	var all []string
+	for _, r := range loadUserRoutes() {
+		if r.Active {
+			all = append(all, r.CIDRs...)
+		}
+	}
+	return strings.Join(all, " ")
+}
+
+func updateUserRoutesOnInterface(iface string) {
+	cidrs := loadActiveUserCIDRs()
+	if cidrs == "" {
+		return
+	}
+	// Remove old user routes first
+	for _, r := range loadUserRoutes() {
+		for _, c := range r.CIDRs {
+			sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
+		}
+	}
+	// Add all active
+	updateRoutes(iface, cidrs)
 }
 
 // === Interface ===
@@ -924,6 +1010,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 
 .config-nav-item{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s;margin-bottom:2px}
 .config-nav-item:hover{background:rgba(255,255,255,0.05)}
+.config-nav-item.active{background:rgba(88,166,255,0.12)}
 .config-nav-item .cn-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .config-nav-item .cn-badge{font-size:11px;color:var(--accent);margin-left:4px}
 
@@ -995,7 +1082,10 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 
 <!-- Tab: Services -->
 <div id="tab-services" class="tab-content">
+
+  <!-- GitHub Services -->
   <div class="card flat">
+    <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px">GitHub Services</h2>
     <form method="post">
       <div class="grid">__SERVICES__</div>
       <div class="flex mt">
@@ -1004,6 +1094,32 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
       </div>
     </form>
   </div>
+
+  <!-- Custom Routes -->
+  <div class="card flat" style="margin-top:16px">
+    <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px">Custom Routes</h2>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div style="min-width:160px;flex-shrink:0">
+        <div id="user-routes-list" style="margin-bottom:8px">__USER_ROUTES_LIST__</div>
+        <button class="btn btn-sm btn-save" onclick="newUserRoute()">+ New Route</button>
+      </div>
+      <div style="flex:1;min-width:260px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <input type="text" id="ur-name" value="" placeholder="Route name" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--fg);font-size:13px;flex:1;min-width:120px">
+          <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="ur-active" checked> Active
+          </label>
+          <button class="btn btn-sm btn-save" onclick="saveUserRoute()">Save</button>
+          <button class="btn btn-sm btn-down" onclick="deleteUserRoute()" id="btn-del-ur" style="display:none">Delete</button>
+        </div>
+        <textarea class="config" id="ur-cidrs" style="min-height:120px" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16">10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16</textarea>
+        <div id="ur-msg" class="mt" style="font-size:13px"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Tab: Config -->
@@ -1175,7 +1291,100 @@ function switchLang(l) {
 // Initial load: load active config
 window.onload = function() {
   renderConfigNav();
+  renderUserRoutesNav();
 };
+
+// === User Routes ===
+var currentUserRoute = '';
+
+function renderUserRoutesNav() {
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/user-routes', true);
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    var html = '';
+    for (var i = 0; i < r.routes.length; i++) {
+      var u = r.routes[i];
+      var badge = u.active ? ' <span class="cn-badge">●</span>' : '';
+      var cls = 'config-nav-item';
+      if (u.name === currentUserRoute) cls += ' active';
+      html += '<div class="'+cls+'" onclick="loadUserRoute(\''+escHtml(u.name).replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(u.name)+'</span>'+badge+'</div>';
+    }
+    document.getElementById('user-routes-list').innerHTML = html;
+  };
+  x.send();
+}
+
+function loadUserRoute(name) {
+  currentUserRoute = name;
+  document.getElementById('ur-name').value = name;
+  document.getElementById('btn-del-ur').style.display = '';
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/user-route/load?name='+encodeURIComponent(name), true);
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showUrMsg('<span class="error">'+r.error+'</span>'); return; }
+    document.getElementById('ur-name').value = r.name;
+    document.getElementById('ur-cidrs').value = r.cidrs.join('\n');
+    document.getElementById('ur-active').checked = r.active;
+    renderUserRoutesNav();
+  };
+  x.send();
+}
+
+function saveUserRoute() {
+  var name = document.getElementById('ur-name').value.trim();
+  var raw = document.getElementById('ur-cidrs').value;
+  var active = document.getElementById('ur-active').checked;
+  if (!name) { showUrMsg('<span class="error">Enter route name</span>'); return; }
+  var lines = raw.split('\n').filter(function(l){return l.trim()!==''});
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/user-route/save', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showUrMsg('<span class="error">'+r.error+'</span>'); return; }
+    currentUserRoute = r.name;
+    showUrMsg('<span class="success">'+r.message+'</span>');
+    renderUserRoutesNav();
+  };
+  x.send('name='+encodeURIComponent(name)+'&cidrs='+encodeURIComponent(lines.join('\n'))+'&active='+(active?'1':'0')+(currentUserRoute&&currentUserRoute!==name?'&old='+encodeURIComponent(currentUserRoute):''));
+  currentUserRoute = name;
+}
+
+function deleteUserRoute() {
+  if (!currentUserRoute) return;
+  if (!confirm('Delete route "'+currentUserRoute+'"?')) return;
+  var x = new XMLHttpRequest();
+  x.open('POST', '/api/user-route/delete', true);
+  x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+  x.onload = function() {
+    var r = JSON.parse(x.responseText);
+    if (r.error) { showUrMsg('<span class="error">'+r.error+'</span>'); return; }
+    currentUserRoute = '';
+    document.getElementById('ur-name').value = '';
+    document.getElementById('ur-cidrs').value = '';
+    document.getElementById('ur-active').checked = true;
+    document.getElementById('btn-del-ur').style.display = 'none';
+    showUrMsg('<span class="success">'+r.message+'</span>');
+    renderUserRoutesNav();
+  };
+  x.send('name='+encodeURIComponent(currentUserRoute));
+}
+
+function newUserRoute() {
+  currentUserRoute = '';
+  document.getElementById('ur-name').value = '';
+  document.getElementById('ur-cidrs').value = '';
+  document.getElementById('ur-active').checked = true;
+  document.getElementById('btn-del-ur').style.display = 'none';
+  showUrMsg('');
+  renderUserRoutesNav();
+}
+
+function showUrMsg(msg) {
+  document.getElementById('ur-msg').innerHTML = msg || '';
+}
 </script>
 </body></html>`
 }
@@ -1318,6 +1527,7 @@ func showPage(w http.ResponseWriter, output string) {
 		"__CONFIG_TEXT__":   "",
 		"__CONFIG_NAME__":   "",
 		"__CONFIG_LIST__":   "",
+		"__USER_ROUTES_LIST__": "",
 		"__CURRENT_CFG__":   "",
 		"__STATUS_DOT__":    statusDot,
 		"__STATUS_TEXT__":   statusText,
@@ -1402,7 +1612,18 @@ func showPage(w http.ResponseWriter, output string) {
 			svcHTML.WriteString(fmt.Sprintf(`<label><input type="checkbox" name="service" value="%s"%s>%s</label>`, htmlEsc(s.Name), checked, htmlEsc(s.Name)))
 		}
 	}
-	repl["__SERVICES__"] = svcHTML.String()
+		repl["__SERVICES__"] = svcHTML.String()
+
+	// Заполняем пользовательские роуты
+	var urHTML strings.Builder
+	for _, u := range loadUserRoutes() {
+		badge := ""
+		if u.Active {
+			badge = `<span class="cn-badge">&#9679;</span>`
+		}
+		urHTML.WriteString(fmt.Sprintf(`<div class="config-nav-item" onclick="loadUserRoute('%s')"><span class="cn-name">%s</span>%s</div>`, htmlEsc(u.Name), htmlEsc(u.Name), badge))
+	}
+	repl["__USER_ROUTES_LIST__"] = urHTML.String()
 
 	render(w, repl)
 }
@@ -1548,6 +1769,72 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 			"message": fmt.Sprintf("%s — %s", strings.TrimSuffix(name, ".conf"), lang["config.activated"]),
 			"name":    name,
 		})
+
+	case "/user-routes":
+		routes := loadUserRoutes()
+		type ri struct {
+			Name   string `json:"name"`
+			Active bool   `json:"active"`
+		}
+		items := make([]ri, 0, len(routes))
+		for _, u := range routes {
+			items = append(items, ri{Name: u.Name, Active: u.Active})
+		}
+		respondJSON(w, map[string]interface{}{"routes": items})
+
+	case "/user-route/load":
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		for _, u := range loadUserRoutes() {
+			if u.Name == name {
+				respondJSON(w, map[string]interface{}{
+					"name":   u.Name,
+					"cidrs":  u.CIDRs,
+					"active": u.Active,
+				})
+				return
+			}
+		}
+		jsonError(w, "not found")
+
+	case "/user-route/save":
+		r.ParseForm()
+		name := strings.TrimSpace(r.FormValue("name"))
+		cidrsRaw := r.FormValue("cidrs")
+		active := r.FormValue("active") == "1"
+		old := r.FormValue("old")
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		cidrs := strings.Split(cidrsRaw, "\n")
+		if old != "" && old != name {
+			deleteUserRoute(old)
+		}
+		saveUserRoute(name, cidrs, active)
+		if iface := findActiveInterface(); iface != "" {
+			updateUserRoutesOnInterface(iface)
+		}
+		respondJSON(w, map[string]string{
+			"message": "Route saved",
+			"name":    name,
+		})
+
+	case "/user-route/delete":
+		r.ParseForm()
+		name := r.FormValue("name")
+		if name == "" {
+			jsonError(w, "name required")
+			return
+		}
+		deleteUserRoute(name)
+		if iface := findActiveInterface(); iface != "" {
+			updateUserRoutesOnInterface(iface)
+		}
+		respondJSON(w, map[string]string{"message": "Route deleted"})
 
 	default:
 		jsonError(w, "unknown API endpoint")

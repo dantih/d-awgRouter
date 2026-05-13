@@ -1,0 +1,40 @@
+name: bump-version
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    # Don't run on commits that are just version bumps (avoid infinite loop)
+    if: "!contains(github.event.head_commit.message, '[skip-version]')"
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump minor version
+        run: |
+          FILE="version.txt"
+          if [ ! -f "$FILE" ]; then
+            echo "1.0.0" > "$FILE"
+          fi
+          OLD=$(cat "$FILE" | tr -d ' \n')
+          MAJOR=$(echo "$OLD" | cut -d. -f1)
+          MINOR=$(echo "$OLD" | cut -d. -f2)
+          PATCH=$(echo "$OLD" | cut -d. -f3)
+          NEW_MINOR=$((MINOR + 1))
+          echo "${MAJOR}.${NEW_MINOR}.${PATCH}" > "$FILE"
+          echo "Version: $OLD → $(cat $FILE)"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "d-awg-bot"
+          git config user.email "bot@d-awg-router"
+          git add version.txt
+          git commit -m "Bump version [skip-version]"
+          git push

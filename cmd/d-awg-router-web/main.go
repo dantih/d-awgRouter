@@ -83,9 +83,15 @@ func init() {
 	for _, d := range []string{configsDir, cacheDir, routesDir, stateDir} {
 		os.MkdirAll(d, 0755)
 	}
-	// Загрузка версии
-	if data, err := os.ReadFile("version.txt"); err == nil {
+	// Загрузка версии (из ~/.d-awg-router/version.txt с фолбэком на version.txt рядом с бинарником)
+	verPath := filepath.Join(awgDir, "version.txt")
+	if data, err := os.ReadFile(verPath); err == nil {
 		appVersion = strings.TrimSpace(string(data))
+	} else if exe, err := os.Executable(); err == nil {
+		verPath := filepath.Join(filepath.Dir(exe), "version.txt")
+		if data, err := os.ReadFile(verPath); err == nil {
+			appVersion = strings.TrimSpace(string(data))
+		}
 	}
 	// Загрузка языка
 	langName = "en"

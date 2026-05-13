@@ -1980,11 +1980,55 @@ func iconHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	initPage()
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "start":
+			launchctl("load")
+			fmt.Println("Service started")
+		case "stop":
+			launchctl("unload")
+			fmt.Println("Service stopped")
+		case "restart":
+			launchctl("unload")
+			launchctl("load")
+			fmt.Println("Service restarted")
+		case "status":
+			statusService()
+		default:
+			fmt.Printf("Usage: %s [start|stop|restart|status]\n", os.Args[0])
+		}
+		return
+	}
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/icon", iconHandler)
 	addr := fmt.Sprintf("%s:%s", host, port)
 	println("d-awg-router-web on", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		panic(err)
+	}
+}
+
+func launchctl(action string) {
+	home, _ := os.UserHomeDir()
+	plist := filepath.Join(home, "Library/LaunchAgents/com.d-awg-router.web.plist")
+	exec.Command("launchctl", action, plist).Run()
+}
+
+func statusService() {
+	out, err := exec.Command("launchctl", "list", "com.d-awg-router.web").Output()
+	if err != nil {
+		fmt.Println("Service not running")
+		return
+	}
+	lines := strings.Split(string(out), "\n")
+	if len(lines) > 0 {
+		parts := strings.Fields(lines[0])
+		if len(parts) >= 3 && parts[1] == "0" {
+			fmt.Println("Service is running (PID:", parts[0]+")")
+		} else if len(parts) >= 3 {
+			fmt.Println("Service exited with code:", parts[1])
+		} else {
+			fmt.Println("Status:", string(out))
+		}
 	}
 }

@@ -1053,7 +1053,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 .config-nav-item:hover{background:rgba(255,255,255,0.05)}
 .config-nav-item.active{background:rgba(88,166,255,0.12)}
 .config-nav-item .cn-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.config-nav-item .cn-badge{font-size:11px;color:var(--accent);margin-left:4px}
+
 
 /* responsive */
 @media(max-width:640px){
@@ -1298,7 +1298,6 @@ function renderConfigNav() {
     var html = '';
     for (var i = 0; i < r.configs.length; i++) {
       var c = r.configs[i];
-      var badge = c.active ? ' <span class="cn-badge">●</span>' : '';
       var cls = 'config-nav-item';
       html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span>'+badge+'</div>';
     }
@@ -1343,12 +1342,10 @@ function renderUserRoutesNav() {
     var html = '';
     for (var i = 0; i < r.routes.length; i++) {
       var u = r.routes[i];
-      var badge = u.active ? ' <span class="cn-badge">●</span>' : '';
       var cls = 'config-nav-item';
       if (u.name === currentUserRoute) cls += ' active';
       html += '<div class="'+cls+'">'
         + '<span class="cn-name" onclick="loadUserRoute(\''+escHtml(u.name).replace(/'/g,"\\'")+'\')">'+escHtml(u.name)+'</span>'
-        + badge
         + '<label style="font-size:11px;color:var(--muted);cursor:pointer;margin-right:4px" onclick="event.stopPropagation()">'
         + '<input type="checkbox" style="width:14px;height:14px;cursor:pointer" '+(u.active?'checked':'')+' onchange="toggleUserRoute(\''+escHtml(u.name).replace(/'/g,"\\'")+'\', this.checked)">'
         + '</label>'
@@ -1676,16 +1673,12 @@ func showPage(w http.ResponseWriter, output string) {
 	// Заполняем пользовательские роуты
 	var urHTML strings.Builder
 	for _, u := range loadUserRoutes() {
-		badge := ""
-		if u.Active {
-			badge = `<span class="cn-badge">&#9679;</span>`
-		}
-		activeChecked := ""
+activeChecked := ""
 		if u.Active {
 			activeChecked = " checked"
 		}
 		nameEsc := htmlEsc(u.Name)
-		urHTML.WriteString(fmt.Sprintf(`<div class="config-nav-item"><span class="cn-name" onclick="loadUserRoute('%s')">%s</span>%s<label style="font-size:11px;color:var(--muted);cursor:pointer;margin-right:4px" onclick="event.stopPropagation()"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"%s onchange="toggleUserRoute('%s', this.checked)"></label></div>`, nameEsc, nameEsc, badge, activeChecked, nameEsc))
+		urHTML.WriteString(fmt.Sprintf(`<div class="config-nav-item"><span class="cn-name" onclick="loadUserRoute('%s')">%s</span><label style="font-size:11px;color:var(--muted);cursor:pointer;margin-right:4px" onclick="event.stopPropagation()"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"%s onchange="toggleUserRoute('%s', this.checked)"></label></div>`, nameEsc, nameEsc, activeChecked, nameEsc))
 	}
 	repl["__USER_ROUTES_LIST__"] = urHTML.String()
 

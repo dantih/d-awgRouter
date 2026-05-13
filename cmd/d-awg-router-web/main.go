@@ -2009,9 +2009,27 @@ func main() {
 }
 
 func launchctl(action string) {
+	ensurePlist()
 	home, _ := os.UserHomeDir()
 	plist := filepath.Join(home, "Library/LaunchAgents/com.d-awg-router.web.plist")
 	exec.Command("launchctl", action, plist).Run()
+}
+
+func ensurePlist() {
+	home, _ := os.UserHomeDir()
+	plist := filepath.Join(home, "Library/LaunchAgents/com.d-awg-router.web.plist")
+	existing, err := os.ReadFile(plist)
+	if err != nil {
+		return // doesn't exist, nothing to fix
+	}
+	s := string(existing)
+	// Update binary path from ~/d-awg-router-web to ~/.d-awg-router/d-awg-router-web
+	newPath := filepath.Join(home, ".d-awg-router", "d-awg-router-web")
+	oldPath := filepath.Join(home, "d-awg-router-web")
+	if !strings.Contains(s, newPath) {
+		s = strings.ReplaceAll(s, oldPath, newPath)
+		os.WriteFile(plist, []byte(s), 0644)
+	}
 }
 
 func statusService() {

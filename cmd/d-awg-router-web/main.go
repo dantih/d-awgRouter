@@ -1114,13 +1114,13 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 <div id="tab-control" class="tab-content active">
   <div class="card">
     <h2>__L_TAB_CONTROL__</h2>
-    <form method="post" class="flex" onsubmit="return confirmAction(event)">
-      <button class="btn btn-up" name="cmd" value="up" id="btn-up" __UP_DISABLED__>__L_BTN_UP__</button>
-      <button class="btn btn-down" name="cmd" value="down" id="btn-down" __DOWN_DISABLED__>__L_BTN_DOWN__</button>
-      <button class="btn btn-restart" name="cmd" value="restart" id="btn-restart" __RESTART_DISABLED__>__L_BTN_RESTART__</button>
-      <button class="btn btn-show" name="cmd" value="show">SHOW</button>
-      <button class="btn btn-routes" name="cmd" value="routes-force" id="btn-routes" __ROUTES_DISABLED__>ROUTES</button>
-    </form>
+    <div class="flex" id="ctrl-btns">
+      <button class="btn btn-up" onclick="cmdUp()" id="btn-up" __UP_DISABLED__>__L_BTN_UP__</button>
+      <button class="btn btn-down" onclick="cmdDown()" id="btn-down" __DOWN_DISABLED__>__L_BTN_DOWN__</button>
+      <button class="btn btn-restart" onclick="cmdRestart()" id="btn-restart" __RESTART_DISABLED__>__L_BTN_RESTART__</button>
+      <button class="btn btn-show" onclick="cmdShow()">SHOW</button>
+      <button class="btn btn-routes" onclick="cmdRoutes()" id="btn-routes" __ROUTES_DISABLED__>ROUTES</button>
+    </div>
   </div>
   <div class="card">
     <h2>__L_OUTPUT__</h2>
@@ -1138,7 +1138,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
       <div class="grid">__SERVICES__</div>
       <div class="flex mt">
         <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
-        <button class="btn btn-routes" name="cmd" value="update-cidr" onclick="showSpinner('output')">__L_BTN_LOAD__</button>
+        <button class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>
       </div>
     </form>
   </div>
@@ -1202,17 +1202,29 @@ document.addEventListener("click", function(e) {
   document.getElementById("tab-"+name).classList.add("active");
 });
 
-function confirmAction(e) {
-  var v = e.submitter.value;
-  showSpinner('output');
-  if (v==="down" && !confirm("__L_CONFIRM_DOWN__")) { document.getElementById('output').innerHTML = '<pre></pre>'; return false; }
-  if (v==="restart" && !confirm("__L_CONFIRM_RESTART__")) { document.getElementById('output').innerHTML = '<pre></pre>'; return false; }
-  return true;
+function fetchCmd(url) {
+  document.getElementById('output').innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
+  var x = new XMLHttpRequest();
+  x.open('GET', url, true);
+  x.onload = function() {
+    document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText)+'</pre>';
+    // Refresh page to update status bar
+    location.reload();
+  };
+  x.send();
 }
 
-function showSpinner(id) {
-  document.getElementById(id).innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
+function cmdUp() { fetchCmd('/api/up'); }
+function cmdDown() {
+  if (!confirm("__L_CONFIRM_DOWN__")) return;
+  fetchCmd('/api/down');
 }
+function cmdRestart() {
+  if (!confirm("__L_CONFIRM_RESTART__")) return;
+  fetchCmd('/api/restart');
+}
+function cmdShow() { fetchCmd('/api/show'); }
+function cmdRoutes() { fetchCmd('/api/routes-force'); }
 
 // Config management
 var currentConfig = '__CURRENT_CFG__';

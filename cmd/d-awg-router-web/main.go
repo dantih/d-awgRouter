@@ -1091,8 +1091,8 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 <!-- Status Bar -->
 <div class="status-bar">
   <span class="status-item">
-    <span class="status-dot __STATUS_DOT__"></span>
-    __STATUS_TEXT__
+    <span class="status-dot __STATUS_DOT__" id="status-dot"></span>
+    <span id="status-text">__STATUS_TEXT__</span>
   </span>
   <span class="status-item" style="color:var(--muted)">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zM8 0a8 8 0 100 16A8 8 0 008 0zM6.5 5.5a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zM7 9h2v4H7V9z"/></svg>

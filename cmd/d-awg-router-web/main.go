@@ -1125,7 +1125,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
   </div>
   <div class="card">
     <h2>__L_OUTPUT__</h2>
-    <pre class="output-sm">__OUTPUT__</pre>
+    <pre id="output" class="output-sm">__OUTPUT__</pre>
   </div>
 </div>
 
@@ -1323,7 +1323,7 @@ function renderConfigNav() {
     for (var i = 0; i < r.configs.length; i++) {
       var c = r.configs[i];
       var cls = 'config-nav-item';
-      html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span>'+badge+'</div>';
+      html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span>''</div>';
     }
     document.getElementById('config-list').innerHTML = html;
   };

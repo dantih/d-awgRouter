@@ -1323,7 +1323,7 @@ function renderConfigNav() {
     for (var i = 0; i < r.configs.length; i++) {
       var c = r.configs[i];
       var cls = 'config-nav-item';
-      html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span>''</div>';
+      html += '<div class="'+cls+'" onclick="loadConfig(\''+c.name.replace(/'/g,"\\'")+'\')"><span class="cn-name">'+escHtml(c.display)+'</span></div>';
     }
     document.getElementById('config-list').innerHTML = html;
   };

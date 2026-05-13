@@ -1138,7 +1138,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
       <div class="grid">__SERVICES__</div>
       <div class="flex mt">
         <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
-        <button class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>
+        <button class="btn btn-routes" onclick="fetchCmd('update-cidr')">__L_BTN_LOAD__</button>
       </div>
     </form>
   </div>
@@ -1205,26 +1205,28 @@ document.addEventListener("click", function(e) {
 function fetchCmd(url) {
   document.getElementById('output').innerHTML = '<div class="spinner"><div class="spinner-dot"></div><div class="spinner-dot"></div><div class="spinner-dot"></div></div>';
   var x = new XMLHttpRequest();
-  x.open('GET', url, true);
+  x.open('POST', '/', true);
+  x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
   x.onload = function() {
-    document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText)+'</pre>';
-    // Refresh page to update status bar
-    location.reload();
+    var html = x.responseText;
+    var m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+    if (m) { document.getElementById('output').innerHTML = '<pre>'+m[1]+'</pre>'; }
+    setTimeout(function(){ window.location.reload(); }, 400);
   };
-  x.send();
+  x.send('cmd='+encodeURIComponent(url));
 }
 
-function cmdUp() { fetchCmd('/api/up'); }
+function cmdUp() { fetchCmd('up'); }
 function cmdDown() {
   if (!confirm("__L_CONFIRM_DOWN__")) return;
-  fetchCmd('/api/down');
+  fetchCmd('down');
 }
 function cmdRestart() {
   if (!confirm("__L_CONFIRM_RESTART__")) return;
-  fetchCmd('/api/restart');
+  fetchCmd('restart');
 }
-function cmdShow() { fetchCmd('/api/show'); }
-function cmdRoutes() { fetchCmd('/api/routes-force'); }
+function cmdShow() { fetchCmd('show'); }
+function cmdRoutes() { fetchCmd('routes-force'); }
 
 // Config management
 var currentConfig = '__CURRENT_CFG__';
@@ -1248,7 +1250,7 @@ function loadConfig(name) {
     document.getElementById('btn-del-config').style.display = '';
     renderConfigNav();
   };
-  x.send();
+  x.send('cmd='+encodeURIComponent(url));
 }
 
 function saveConfig() {
@@ -1327,7 +1329,7 @@ function renderConfigNav() {
     }
     document.getElementById('config-list').innerHTML = html;
   };
-  x.send();
+  x.send('cmd='+encodeURIComponent(url));
 }
 
 // Remove old functions
@@ -1377,7 +1379,7 @@ function renderUserRoutesNav() {
     }
     document.getElementById('user-routes-list').innerHTML = html;
   };
-  x.send();
+  x.send('cmd='+encodeURIComponent(url));
 }
 
 function toggleUserRoute(name, active) {
@@ -1404,7 +1406,7 @@ function loadUserRoute(name) {
                     //
     renderUserRoutesNav();
   };
-  x.send();
+  x.send('cmd='+encodeURIComponent(url));
 }
 
 function saveUserRoute() {

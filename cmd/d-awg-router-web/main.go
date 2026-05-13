@@ -1223,7 +1223,11 @@ function fetchCmd(url) {
         document.getElementById('status-dot').className = 'status-dot '+(st.vpnActive?'green':'red');
         document.getElementById('status-text').textContent = st.vpnActive ? '__L_STATUS_ONLINE__' : '__L_STATUS_OFFLINE__';
         document.getElementById('iface-text').textContent = st.interface;
-        document.getElementById('routes-text').textContent = st.routeCount + ' routes';
+        document.getElementById("routes-text").textContent = st.routeCount + ' routes';
+        document.getElementById('btn-up').disabled = st.upDisabled;
+        document.getElementById('btn-down').disabled = st.downDisabled;
+        document.getElementById('btn-restart').disabled = !st.vpnActive;
+        document.getElementById('btn-routes').disabled = !st.vpnActive;
       } catch(e){}
     };
     s.send();
@@ -1512,6 +1516,33 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(cmdRoutesForce()))
 		case "/update-cidr":
 			w.Write([]byte(updateAllCIDRs()))
+		case "/status":
+			iface := findActiveInterface()
+			cidrs := loadAllCIDRs()
+			routeCount := countCIDRs(cidrs)
+			userRoutes := loadUserRoutes()
+			activeUsers := 0
+			for _, u := range userRoutes {
+				if u.Active {
+					activeUsers++
+				}
+			}
+			vpnActive := iface != ""
+			j, _ := json.Marshal(struct {
+				VPNActive    bool `json:"vpnActive"`
+				Interface    string `json:"interface"`
+				RouteCount   int    `json:"routeCount"`
+				UpDisabled   bool   `json:"upDisabled"`
+				DownDisabled bool   `json:"downDisabled"`
+			}{
+				VPNActive:    vpnActive,
+				Interface:    iface,
+				RouteCount:   routeCount,
+				UpDisabled:   vpnActive,
+				DownDisabled: !vpnActive,
+			})
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(j)
 		default:
 			handleAPI(w, r)
 		}

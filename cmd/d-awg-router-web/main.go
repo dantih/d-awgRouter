@@ -31,6 +31,7 @@ var (
 	activeCfg  string // имя активного конфига
 	langName   string // текущий язык "en" или "ru"
 	lang       LangMap
+	appVersion string
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
@@ -81,6 +82,10 @@ func init() {
 	stateDir = filepath.Join(awgDir, "state")
 	for _, d := range []string{configsDir, cacheDir, routesDir, stateDir} {
 		os.MkdirAll(d, 0755)
+	}
+	// Загрузка версии
+	if data, err := os.ReadFile("version.txt"); err == nil {
+		appVersion = strings.TrimSpace(string(data))
 	}
 	// Загрузка языка
 	langName = "en"
@@ -928,7 +933,7 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
 <!-- Header -->
 <div class="header">
   <img src="/icon" alt="" width="28" height="28" style="border-radius:6px;flex-shrink:0">
-  <h1>d-awg-router</h1>
+  <h1>d-awg-router <span style="font-size:13px;color:var(--muted);font-weight:400">v__APP_VERSION__</span></h1>
   <span class="sub">WireGuard / AmneziaWG VPN Router</span>
   <div style="margin-left:auto;font-size:12px;display:flex;align-items:center;gap:4px">
     <span style="color:var(--muted)">__L_LANG__:</span>
@@ -1344,6 +1349,7 @@ func showPage(w http.ResponseWriter, output string) {
 		"__L_CONFIRM_DEL__": lang["confirm.delete"],
 		"__L_SEL_EN__": "",
 		"__L_SEL_RU__": "",
+		"__APP_VERSION__": appVersion,
 	}
 	if langName == "ru" {
 		repl["__L_SEL_RU__"] = "selected"

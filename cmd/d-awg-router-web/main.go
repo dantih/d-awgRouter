@@ -1985,14 +1985,14 @@ func main() {
 		switch os.Args[1] {
 		case "start":
 			launchctl("load")
-			fmt.Println("Service started")
+			fmt.Printf("d-awg-router %s started on http://%s:%s\n", appVersion, host, port)
 		case "stop":
 			launchctl("unload")
-			fmt.Println("Service stopped")
+			fmt.Printf("d-awg-router %s stopped\n", appVersion)
 		case "restart":
 			launchctl("unload")
 			launchctl("load")
-			fmt.Println("Service restarted")
+			fmt.Printf("d-awg-router %s restarted on http://%s:%s\n", appVersion, host, port)
 		case "status":
 			statusService()
 		default:

@@ -1134,11 +1134,11 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
   <!-- GitHub Services -->
   <div class="card flat">
     <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px">GitHub Services</h2>
-    <form method="post">
+    <form method="post" class="flex" style="flex-direction:column" onsubmit="showSpinner('output'); return true;">
       <div class="grid">__SERVICES__</div>
       <div class="flex mt">
-        <button class="btn btn-save" onclick="doCmd('save-services', '__L_BTN_SAVE__')">__L_BTN_SAVE__</button>
-        <button class="btn btn-routes" onclick="doCmd('update-cidr', '__L_BTN_LOAD__')">__L_BTN_LOAD__</button>
+        <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
+        <button class="btn btn-routes" name="cmd" value="update-cidr" onclick="showSpinner('output')">__L_BTN_LOAD__</button>
       </div>
     </form>
   </div>

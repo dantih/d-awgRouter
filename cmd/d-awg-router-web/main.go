@@ -1096,11 +1096,11 @@ label.service input{margin:0;width:16px;height:16px;cursor:pointer}
   </span>
   <span class="status-item" style="color:var(--muted)">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zM8 0a8 8 0 100 16A8 8 0 008 0zM6.5 5.5a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zM7 9h2v4H7V9z"/></svg>
-    __INTERFACE__
+    <span id="iface-text">__INTERFACE__</span>
   </span>
   <span class="status-item" style="color:var(--muted)">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zM4.5 7.5a.5.5 0 010-1h1V5a.5.5 0 011 0v2.5a.5.5 0 01-.5.5h-1.5zm6 0a.5.5 0 010-1h1V5a.5.5 0 011 0v2.5a.5.5 0 01-.5.5h-1.5z"/></svg>
-    __ROUTES__
+    <span id="routes-text">__ROUTES__</span>
   </span>
 </div>
 
@@ -1203,6 +1203,29 @@ document.addEventListener("click", function(e) {
   document.getElementById("tab-"+name).classList.add("active");
 });
 
+function updateStatusBar(st) {
+  document.getElementById('status-dot').className = 'status-dot '+(st.vpnActive?'green':'red');
+  document.getElementById('status-text').textContent = st.vpnActive ? '__L_STATUS_ONLINE__' : '__L_STATUS_OFFLINE__';
+  document.getElementById('iface-text').textContent = st.interface || '—';
+  document.getElementById('routes-text').textContent = st.routeCount + ' routes';
+  document.getElementById('btn-up').disabled = st.upDisabled;
+  document.getElementById('btn-down').disabled = st.downDisabled;
+  document.getElementById('btn-restart').disabled = !st.vpnActive;
+  document.getElementById('btn-routes').disabled = !st.vpnActive;
+}
+
+function refreshStatusBar() {
+  var s = new XMLHttpRequest();
+  s.open('GET', '/api/status', true);
+  s.onload = function() {
+    try {
+      var st = JSON.parse(s.responseText);
+      updateStatusBar(st);
+    } catch(e){}
+  };
+  s.send();
+}
+
 function fetchCmd(url) {
   var dots = 0;
   document.getElementById('output').innerHTML = '<pre>Executing';
@@ -1215,22 +1238,11 @@ function fetchCmd(url) {
   x.onload = function() {
     clearInterval(d);
     document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText)+'</pre>';
-    var s = new XMLHttpRequest();
-    s.open('GET', '/api/status', true);
-    s.onload = function() {
-      try {
-        var st = JSON.parse(s.responseText);
-        document.getElementById('status-dot').className = 'status-dot '+(st.vpnActive?'green':'red');
-        document.getElementById('status-text').textContent = st.vpnActive ? '__L_STATUS_ONLINE__' : '__L_STATUS_OFFLINE__';
-        document.getElementById('iface-text').textContent = st.interface;
-        document.getElementById("routes-text").textContent = st.routeCount + ' routes';
-        document.getElementById('btn-up').disabled = st.upDisabled;
-        document.getElementById('btn-down').disabled = st.downDisabled;
-        document.getElementById('btn-restart').disabled = !st.vpnActive;
-        document.getElementById('btn-routes').disabled = !st.vpnActive;
-      } catch(e){}
-    };
-    s.send();
+    refreshStatusBar();
+  };
+  x.onerror = function() {
+    clearInterval(d);
+    document.getElementById('output').innerHTML = '<pre class="error">Request failed</pre>';
   };
   x.send();
 }
@@ -1351,9 +1363,6 @@ function renderConfigNav() {
   x.send();
 }
 
-// Remove old functions
-var currentConfig = '__CURRENT_CFG__';
-
 function showCfgMsg(msg) {
   document.getElementById('config-msg').innerHTML = msg || '';
 }
@@ -1374,6 +1383,7 @@ function switchLang(l) {
 window.onload = function() {
   renderConfigNav();
   renderUserRoutesNav();
+  refreshStatusBar();
 };
 
 // === User Routes ===

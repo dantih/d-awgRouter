@@ -1008,9 +1008,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .tab-content.active{display:block}
 
 /* cards */
-.card{background:var(--card);border:1px solid var(--border);border-radius:0 8px 8px 8px;padding:16px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:0 8px 8px 8px;padding:10px 14px;margin-bottom:10px}
 .card.flat{border-radius:8px}
-.card h2{font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px}
+.card h2{font-size:11.5px;color:var(--muted);text-transform:uppercase;margin-bottom:6px;letter-spacing:0.5px}
 .card h3{font-size:14px;color:var(--fg);margin-bottom:10px}
 
 /* buttons */
@@ -1034,15 +1034,15 @@ pre.output-sm{max-height:200px}
 
 textarea.config{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--fg);font-family:monospace;font-size:12px;min-height:200px;resize:vertical}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
-label.service{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:3px}
+label.service{display:flex;align-items:center;gap:6px;padding:3px 6px;cursor:pointer;font-size:12px;border-radius:4px;transition:background .15s}
 label.service:hover{background:rgba(255,255,255,0.05)}
-label.service input{margin:0;width:16px;height:16px;cursor:pointer}
+label.service input{margin:0;width:13px;height:13px;cursor:pointer}
 .service-count{font-size:11px;color:var(--muted);margin-left:auto}
-.svc-label{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:13px;border-radius:6px;transition:background .15s}
-.svc-label:hover{background:rgba(255,255,255,0.05)}
-.svc-label input{margin:0;width:16px;height:16px;cursor:pointer}
-.svc-link{color:var(--fg);text-decoration:none;flex:1}
+.svc-label{display:flex;align-items:center;gap:5px;padding:2px 5px;cursor:pointer;font-size:11.5px;border-radius:3px;transition:background .1s}
+.svc-label:hover{background:rgba(255,255,255,0.04)}
+.svc-label input{margin:0;width:12px;height:12px;cursor:pointer}
+.svc-link{color:var(--fg);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .svc-link:hover{color:var(--accent);text-decoration:underline}
 
 .error{color:#f85149}

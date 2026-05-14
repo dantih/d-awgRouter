@@ -39,7 +39,9 @@
 # Скачать последнюю версию
 curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
 chmod +x /tmp/d-awg-router-web
-echo "YOUR_PASSWORD" | sudo -S mv /tmp/d-awg-router-web /usr/local/bin/d-awg-router-web
+echo "YOUR_PASSWORD"
+mkdir -p ~/.d-awg-router
+mv /tmp/d-awg-router-web ~/.d-awg-router/d-awg-router-web
 ```
 
 ### Или через install.sh
@@ -62,7 +64,7 @@ cat > ~/Library/LaunchAgents/com.d-awg-router.web.plist << 'EOF'
     <string>com.d-awg-router.web</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/d-awg-router-web</string>
+        <string>/Users/$(whoami)/.d-awg-router/d-awg-router-web</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -79,6 +81,24 @@ cat > ~/Library/LaunchAgents/com.d-awg-router.web.plist << 'EOF'
 EOF
 
 launchctl load ~/Library/LaunchAgents/com.d-awg-router.web.plist
+```
+
+### CLI-команды
+
+Бинарник поддерживает CLI для управления сервисом через launchd:
+
+```bash
+# Запустить веб-сервер
+~/.d-awg-router/d-awg-router-web start
+
+# Остановить веб-сервер
+~/.d-awg-router/d-awg-router-web stop
+
+# Перезапустить веб-сервер
+~/.d-awg-router/d-awg-router-web restart
+
+# Показать статус (сервис, VPN, конфиг, маршруты)
+~/.d-awg-router/d-awg-router-web status
 ```
 
 ### Использование
@@ -124,7 +144,7 @@ ssh -L 8765:127.0.0.1:8765 mac
 После установки добавьте в `/etc/sudoers.d/d-awg-router`:
 
 ```
-YOUR_USER ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
+YOUR_USER ALL=(ALL) NOPASSWD: /Users/YOUR_USER/.d-awg-router/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
 ```
 
 Либо воспользуйтесь [install.sh](install.sh) — он создаёт sudoers автоматически.

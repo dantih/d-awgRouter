@@ -38,7 +38,8 @@ Routes (CIDR subnets) for various services (Telegram, YouTube, Netflix, etc.) ar
 ```bash
 curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
 chmod +x /tmp/d-awg-router-web
-echo "YOUR_PASSWORD" | sudo -S mv /tmp/d-awg-router-web /usr/local/bin/d-awg-router-web
+mkdir -p ~/.d-awg-router
+mv /tmp/d-awg-router-web ~/.d-awg-router/d-awg-router-web
 ```
 
 ### Or via install.sh
@@ -61,7 +62,7 @@ cat > ~/Library/LaunchAgents/com.d-awg-router.web.plist << 'EOF'
     <string>com.d-awg-router.web</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/d-awg-router-web</string>
+        <string>/Users/$(whoami)/.d-awg-router/d-awg-router-web</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -78,6 +79,24 @@ cat > ~/Library/LaunchAgents/com.d-awg-router.web.plist << 'EOF'
 EOF
 
 launchctl load ~/Library/LaunchAgents/com.d-awg-router.web.plist
+```
+
+### CLI Commands
+
+The binary provides a CLI interface for service management:
+
+```bash
+# Start the web server via launchd
+~/.d-awg-router/d-awg-router-web start
+
+# Stop the web server
+~/.d-awg-router/d-awg-router-web stop
+
+# Restart the web server
+~/.d-awg-router/d-awg-router-web restart
+
+# Show status (service, VPN, config, routes)
+~/.d-awg-router/d-awg-router-web status
 ```
 
 ### Usage
@@ -123,7 +142,7 @@ Language selector in the header (English / Русский).
 After installation, add to `/etc/sudoers.d/d-awg-router`:
 
 ```
-YOUR_USER ALL=(ALL) NOPASSWD: /usr/local/bin/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
+YOUR_USER ALL=(ALL) NOPASSWD: /Users/YOUR_USER/.d-awg-router/d-awg-router-web, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, /opt/homebrew/bin/wg, /opt/homebrew/bin/wireguard-go
 ```
 
 Or use [install.sh](install.sh) — it creates sudoers automatically.

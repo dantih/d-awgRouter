@@ -1039,9 +1039,9 @@ label.service{display:flex;align-items:center;gap:6px;padding:3px 6px;cursor:poi
 label.service:hover{background:rgba(255,255,255,0.05)}
 label.service input{margin:0;width:13px;height:13px;cursor:pointer}
 .service-count{font-size:11px;color:var(--muted);margin-left:auto}
-.svc-label{display:flex;align-items:center;gap:5px;padding:2px 5px;cursor:pointer;font-size:11.5px;border-radius:3px;transition:background .1s}
+.svc-label{display:inline-flex;align-items:center;gap:3px;padding:1px 4px;cursor:pointer;font-size:11px;border-radius:3px;transition:background .1s;white-space:nowrap}
 .svc-label:hover{background:rgba(255,255,255,0.04)}
-.svc-label input{margin:0;width:12px;height:12px;cursor:pointer}
+.svc-label input{margin:0;width:11px;height:11px;cursor:pointer}
 .svc-link{color:var(--fg);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .svc-link:hover{color:var(--accent);text-decoration:underline}
 
@@ -1136,7 +1136,7 @@ label.service input{margin:0;width:13px;height:13px;cursor:pointer}
   <div class="card flat">
     <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px">GitHub Services</h2>
     <form method="post" class="flex" style="flex-direction:column" onsubmit="showSpinner('output'); return true;">
-      <div class="grid">__SERVICES__</div>
+      <div class="svc-list" style="display:flex;flex-wrap:wrap;gap:2px">__SERVICES__</div>
       <div class="flex mt">
         <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
         <button class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>

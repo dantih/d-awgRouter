@@ -1039,7 +1039,7 @@ label.service{display:flex;align-items:center;gap:6px;padding:3px 6px;cursor:poi
 label.service:hover{background:rgba(255,255,255,0.05)}
 label.service input{margin:0;width:13px;height:13px;cursor:pointer}
 .service-count{font-size:11px;color:var(--muted);margin-left:auto}
-.svc-label{display:inline-flex;align-items:center;gap:3px;padding:1px 4px;cursor:pointer;font-size:11px;border-radius:3px;transition:background .1s;white-space:nowrap}
+.svc-label{display:inline-flex;align-items:center;gap:4px;padding:1px 5px;cursor:pointer;font-size:12px;border-radius:3px;transition:background .1s;white-space:nowrap}
 .svc-label:hover{background:rgba(255,255,255,0.04)}
 .svc-label input{margin:0;width:11px;height:11px;cursor:pointer}
 .svc-link{color:var(--fg);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

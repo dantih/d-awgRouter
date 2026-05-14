@@ -1,6 +1,9 @@
-# Files
-
-bin/d-awg-router-web-darwin-arm64
+# Build artifacts
+d-awg-router-web-darwin-arm64
+d-awg-router-web-darwin-amd64
+d-awg-router-web-linux-*
+d-awg-router-web
+/tmp/
 
 # IDEs & tools
 .vscode/
@@ -8,8 +11,11 @@ bin/d-awg-router-web-darwin-arm64
 *.swp
 *.swo
 
-# Build artifacts
-/tmp/
-
 # macOS
 .DS_Store
+
+# Local config
+configs/
+state/
+cache/
+routes/

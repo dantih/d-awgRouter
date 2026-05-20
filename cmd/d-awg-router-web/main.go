@@ -850,10 +850,15 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 		return "[ERROR] no current config"
 	}
 
-	// Сохраняем оригинальный AllowedIPs (если не сохранили)
-	origPath := filepath.Join(stateDir, "orig_allowed_ips")
-	if _, err := os.Stat(origPath); os.IsNotExist(err) {
-		os.WriteFile(origPath, []byte(cfg.AllowedIPs), 0644)
+	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
+
+	// При включении FT сохраняем текущие сервисные CIDR (а не конфиг AllowedIPs)
+	if isFullTunnel {
+		origPath := filepath.Join(stateDir, "orig_allowed_ips")
+		if _, err := os.Stat(origPath); os.IsNotExist(err) {
+			routes := loadAllCIDRs()
+			os.WriteFile(origPath, []byte(routes), 0644)
+		}
 	}
 
 	// Меняем AllowedIPs и применяем через setconf
@@ -869,7 +874,6 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 	}
 	os.Remove(kernConf)
 
-	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
 	if isFullTunnel {
 		return fmt.Sprintf("[\u2713] %s All Traffic", iface)
 	}
@@ -885,7 +889,11 @@ func restoreOriginalAllowedIPs() string {
 	}
 	orig := strings.TrimSpace(string(data))
 	os.Remove(origPath)
-	return reloadWithAllowedIPs(orig)
+	// orig — это сервисные CIDR (подсети), не конфиг AllowedIPs
+	// Формируем AllowedIPs строку: сервисные CIDR через запятую
+	fields := strings.Fields(orig)
+	origIPs := strings.Join(fields, ", ")
+	return reloadWithAllowedIPs(origIPs)
 }
 
 
@@ -1014,12 +1022,14 @@ func cmdRoutesForce() string {
 	if isFullTunnel() {
 		return reloadWithAllowedIPs("0.0.0.0/0, ::/0")
 	}
-	// Если full tunnel выключен, но AllowedIPs ещё 0.0.0.0/0 — восстанавливаем
+	// Если full tunnel выключен, но есть orig_allowed_ips — восстанавливаем через reloadWithAllowedIPs
 	origPath := filepath.Join(stateDir, "orig_allowed_ips")
 	if data, err := os.ReadFile(origPath); err == nil {
 		orig := strings.TrimSpace(string(data))
 		if orig != "" {
-			return reloadWithAllowedIPs(orig)
+			fields := strings.Fields(orig)
+			origIPs := strings.Join(fields, ", ")
+			return reloadWithAllowedIPs(origIPs)
 		}
 	}
 	routes := loadAllCIDRs()

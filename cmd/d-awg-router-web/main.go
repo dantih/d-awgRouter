@@ -458,7 +458,32 @@ func saveCIDRCache(name, data string) {
 	os.WriteFile(cachePath(name), []byte(data), 0644)
 }
 
+
+
+// === Full Tunnel ===
+
+func fullTunnelPath() string { return filepath.Join(stateDir, "full_tunnel") }
+
+func isFullTunnel() bool {
+    data, err := os.ReadFile(fullTunnelPath())
+    if err != nil {
+        return false
+    }
+    return strings.TrimSpace(string(data)) == "true"
+}
+
+func setFullTunnel(enabled bool) {
+    val := "false"
+    if enabled {
+        val = "true"
+    }
+    os.WriteFile(fullTunnelPath(), []byte(val), 0644)
+}
+
 func loadAllCIDRs() string {
+	if isFullTunnel() {
+		return "0.0.0.0/0, ::/0"
+	}
 	var all []string
 	for _, s := range loadRoutes() {
 		if d := loadCIDRCache(s); d != "" {
@@ -588,7 +613,16 @@ func findWireGuardGo() string {
 }
 
 func findActiveInterface() string {
-	// Пробуем wg
+	// Сначала читаем из сохранённого состояния (наш интерфейс)
+	if data, err := os.ReadFile(statePath()); err == nil {
+		var st State
+		if json.Unmarshal(data, &st) == nil && st.Interface != "" {
+			if isInterfaceAlive(st.Interface) {
+				return st.Interface
+			}
+		}
+	}
+	// Fallback: пробуем wg
 	if out, err := sudo(wgBin, "show"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			if strings.HasPrefix(line, "interface: ") {
@@ -600,7 +634,7 @@ func findActiveInterface() string {
 			}
 		}
 	}
-	// Пробуем awg
+	// Fallback: пробуем awg
 	if out, err := sudo(awgBin, "show"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			if strings.HasPrefix(line, "interface: ") {
@@ -655,11 +689,32 @@ func updateRoutes(iface, cidrs string) {
 	}
 }
 
+
+func removeRoutesByInterface(iface string) {
+	if iface == "" {
+		return
+	}
+	// Удаляем маршруты сервисов с указанного интерфейса
+	for _, s := range loadRoutes() {
+		for _, c := range strings.Fields(loadCIDRCache(s)) {
+			sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
+		}
+	}
+	for _, u := range loadUserRoutes() {
+		if u.Active {
+			for _, c := range u.CIDRs {
+				sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
+			}
+		}
+	}
+}
+
 func removeAllRoutes() {
 	iface := findActiveInterface()
 	if iface == "" {
 		return
 	}
+	// Удаляем только маршруты сервисов (не трогаем другие VPN интерфейсы)
 	for _, s := range loadRoutes() {
 		for _, c := range strings.Fields(loadCIDRCache(s)) {
 			sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
@@ -815,10 +870,106 @@ func saveState(iface, ip string) {
 }
 func clearState() { os.Remove(statePath()) }
 
+func reloadWithAllowedIPs(allowedIPs string) string {
+	iface := findActiveInterface()
+	if iface == "" {
+		return "[ERROR] no active interface"
+	}
+	cfg := getCurrentConfig()
+	if cfg == nil {
+		return "[ERROR] no current config"
+	}
+	ip := strings.Split(cfg.Address, "/")[0]
+
+	// Сохраняем оригинальный AllowedIPs (если не сохранили)
+	origPath := filepath.Join(stateDir, "orig_allowed_ips")
+	if _, err := os.Stat(origPath); os.IsNotExist(err) {
+		os.WriteFile(origPath, []byte(cfg.AllowedIPs), 0644)
+	}
+
+	// Сохраняем текущий default gateway (original router, не через utun)
+	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
+	if isFullTunnel {
+		defPath := filepath.Join(stateDir, "orig_default_gw")
+		if _, err := os.Stat(defPath); os.IsNotExist(err) {
+			out, _ := exec.Command("sh", "-c", "netstat -rn -f inet | awk '/^default/ {print $2; exit}'").Output()
+			if len(out) > 0 {
+				os.WriteFile(defPath, bytes.TrimSpace(out), 0644)
+			}
+		}
+	}
+
+	// Меняем AllowedIPs
+	cfg.AllowedIPs = allowedIPs
+	// Пишем временный конфиг и применяем через setconf
+	kernConf := filepath.Join(configsDir, "._ft_setconf")
+	cfg.SaveKernelConfig(kernConf)
+	if cfg.IsWireGuard {
+		sudo(wgBin, "setconf", iface, kernConf)
+	} else {
+		sudo(awgBin, "setconf", iface, kernConf)
+	}
+	os.Remove(kernConf)
+	time.Sleep(1 * time.Second)
+
+	// При full tunnel меняем default route на интерфейс VPN
+	if isFullTunnel {
+		// Удаляем старые маршруты сервисов с этим интерфейсом
+		removeRoutesByInterface(iface)
+		// Меняем default на шлюз интерфейса (через хост-маршрут)
+		// Для macOS p2p utun: default route ставим через ip интерфейса как gateway
+		sudo("route", "-q", "-n", "change", "default", ip)
+		return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (All Traffic via %s)", iface, ip)
+	} else {
+		// Восстанавливаем оригинальный default gateway
+		defPath := filepath.Join(stateDir, "orig_default_gw")
+		if data, err := os.ReadFile(defPath); err == nil {
+			orgw := strings.TrimSpace(string(data))
+			if orgw != "" {
+				sudo("route", "-q", "-n", "change", "default", orgw)
+			}
+			os.Remove(defPath)
+		}
+		// Применяем оригинальные маршруты через updateRoutes (не full tunnel)
+		routes := loadAllCIDRs()
+		if routes != "" {
+			updateRoutes(iface, routes)
+		}
+		return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (%d " + tr("s.nets") + ")", iface, countCIDRs(routes))
+	}
+}
+
+func restoreOriginalDefaultGW() {
+	defPath := filepath.Join(stateDir, "orig_default_gw")
+	if data, err := os.ReadFile(defPath); err == nil {
+		orgw := strings.TrimSpace(string(data))
+		if orgw != "" {
+			sudo("route", "-q", "-n", "change", "default", orgw)
+		}
+		os.Remove(defPath)
+	}
+}
+
+func restoreOriginalAllowedIPs() string {
+	origPath := filepath.Join(stateDir, "orig_allowed_ips")
+	data, err := os.ReadFile(origPath)
+	if err != nil {
+		return "[!] no saved original AllowedIPs"
+	}
+	orig := strings.TrimSpace(string(data))
+	os.Remove(origPath)
+	return reloadWithAllowedIPs(orig)
+}
+
+
 func cmdDown() string {
 	iface := findActiveInterface()
 	if iface == "" {
 		return "[!] " + tr("s.none_active")
+	}
+	// Если включён Full Tunnel — восстанавливаем оригинальный AllowedIPs и default gateway
+	if isFullTunnel() {
+		restoreOriginalDefaultGW()
 	}
 	removeAllRoutes()
 
@@ -879,7 +1030,9 @@ func cmdShow() string {
 		out += "\n" + tr("s.output_routes") + "\n"
 		routes := loadRoutes()
 		allCIDRs := loadAllCIDRs()
-		if len(routes) == 0 && loadActiveUserCIDRs() == "" {
+		if isFullTunnel() {
+			out += "  [All Traffic via " + iface + "]\n"
+		} else if len(routes) == 0 && loadActiveUserCIDRs() == "" {
 			out += "  " + tr("s.no_services") + "\n"
 		} else {
 			routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
@@ -933,6 +1086,9 @@ func cmdRoutesForce() string {
 	iface := findActiveInterface()
 	if iface == "" {
 		return "[!] " + tr("s.up_first")
+	}
+	if isFullTunnel() {
+		return reloadWithAllowedIPs("0.0.0.0/0, ::/0")
 	}
 	routes := loadAllCIDRs()
 	if routes == "" {
@@ -1132,6 +1288,13 @@ label.service input{margin:0;width:13px;height:13px;cursor:pointer}
 <!-- Tab: Services -->
 <div id="tab-services" class="tab-content">
 
+  <!-- Full Tunnel -->
+  <div class="card flat" style="margin-bottom:16px">
+    <label class="svc-label" style="font-size:14px;cursor:pointer">
+      <input type="checkbox" id="full-tunnel" onchange="toggleFullTunnel()">
+      <strong>🌐 Full VPN (Route All Traffic)</strong>
+    </label>
+  </div>
   <!-- GitHub Services -->
   <div class="card flat">
     <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px">GitHub Services</h2>
@@ -1192,6 +1355,53 @@ label.service input{margin:0;width:13px;height:13px;cursor:pointer}
 </div>
 
 <script>
+
+var fullTunnelState = false;
+
+function toggleFullTunnel() {
+    var cb = document.getElementById("full-tunnel");
+    fetch("/api/full-tunnel", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({enabled: cb.checked})
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.status === "ok") {
+            fullTunnelState = cb.checked;
+            applyFullTunnelUI(cb.checked);
+            showSpinner("output");
+            fetchCmd("/api/routes-force");
+        }
+    });
+}
+
+function applyFullTunnelUI(enabled) {
+    var containers = document.querySelectorAll("#tab-services");
+    if (containers.length === 0) return;
+    var c = containers[0];
+    var allInputs = c.querySelectorAll("input");
+    var allButtons = c.querySelectorAll("button");
+    var allTextareas = c.querySelectorAll("textarea");
+    if (enabled) {
+        allInputs.forEach(function(el) { if (el.id !== "full-tunnel") { el.disabled = true; el.style.opacity = "0.4"; } });
+        allButtons.forEach(function(el) { el.disabled = true; el.style.opacity = "0.4"; });
+        allTextareas.forEach(function(el) { el.disabled = true; el.style.opacity = "0.4"; });
+    } else {
+        allInputs.forEach(function(el) { el.disabled = false; el.style.opacity = "1"; });
+        allButtons.forEach(function(el) { el.disabled = false; el.style.opacity = "1"; });
+        allTextareas.forEach(function(el) { el.disabled = false; el.style.opacity = "1"; });
+    }
+}
+
+function loadFullTunnelState() {
+    fetch("/api/full-tunnel").then(function(r) { return r.json(); }).then(function(d) {
+        fullTunnelState = d.enabled;
+        var cb = document.getElementById("full-tunnel");
+        if (cb) {
+            cb.checked = d.enabled;
+            applyFullTunnelUI(d.enabled);
+        }
+    });
+}
 // Tabs
 document.addEventListener("click", function(e) {
   var tab = e.target.closest(".tab");
@@ -1383,6 +1593,7 @@ function switchLang(l) {
 window.onload = function() {
   renderConfigNav();
   renderUserRoutesNav();
+  loadFullTunnelState();
   refreshStatusBar();
 };
 
@@ -1417,6 +1628,7 @@ function toggleUserRoute(name, active) {
   x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
   x.onload = function() {
     renderUserRoutesNav();
+  loadFullTunnelState();
   };
   x.send('name='+encodeURIComponent(name)+'&active='+(active?'1':'0'));
 }
@@ -1434,6 +1646,7 @@ function loadUserRoute(name) {
     document.getElementById('ur-cidrs').value = r.cidrs.join('\n');
                     //
     renderUserRoutesNav();
+  loadFullTunnelState();
   };
   x.send();
 }
@@ -1452,6 +1665,7 @@ function saveUserRoute() {
     currentUserRoute = r.name;
     showUrMsg('<span class="success">'+r.message+'</span>');
     renderUserRoutesNav();
+  loadFullTunnelState();
   };
   x.send('name='+encodeURIComponent(name)+'&cidrs='+encodeURIComponent(lines.join('\n'))+(currentUserRoute&&currentUserRoute!==name?'&old='+encodeURIComponent(currentUserRoute):''));
   currentUserRoute = name;
@@ -1472,6 +1686,7 @@ function deleteUserRoute() {
     document.getElementById('btn-del-ur').style.display = 'none';
     showUrMsg('<span class="success">'+r.message+'</span>');
     renderUserRoutesNav();
+  loadFullTunnelState();
   };
   x.send('name='+encodeURIComponent(currentUserRoute));
 }
@@ -1483,6 +1698,7 @@ function newUserRoute() {
   document.getElementById('btn-del-ur').style.display = 'none';
   showUrMsg('');
   renderUserRoutesNav();
+  loadFullTunnelState();
 }
 
 function showUrMsg(msg) {
@@ -1553,6 +1769,26 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			})
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(j)
+		case "/full-tunnel":
+			if r.Method == "GET" {
+				respondJSON(w, map[string]interface{}{
+					"enabled": isFullTunnel(),
+				})
+				return
+			}
+			if r.Method == "POST" {
+				var body struct {
+					Enabled bool `json:"enabled"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					respondJSON(w, map[string]string{"error": "invalid JSON"})
+					return
+				}
+				setFullTunnel(body.Enabled)
+				respondJSON(w, map[string]string{"status": "ok"})
+				return
+			}
+			respondJSON(w, map[string]string{"error": "method not allowed"})
 		default:
 			handleAPI(w, r)
 		}
@@ -2134,7 +2370,7 @@ func statusService() {
 		cidrs := loadAllCIDRs()
 		if count := countCIDRs(cidrs); count > 0 {
 			fmt.Printf("  Routes:   %d loaded\n", count)
-		} else {
+		} else if !isFullTunnel() {
 			fmt.Println("  Routes:   none configured")
 		}
 	} else {

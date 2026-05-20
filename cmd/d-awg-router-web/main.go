@@ -1060,9 +1060,11 @@ func cmdRoutesForce() string {
 
 func updateAllCIDRs() string {
 	services, err := fetchServiceList()
+	totalCIDRs := 0
+	totalOK := 0
+	totalCache := 0
 	allFromCache := false
 	if err != nil {
-		// GitHub недоступен — пробуем из кэша
 		allFromCache = true
 		services = nil
 		for _, s := range loadRoutes() {
@@ -1074,28 +1076,22 @@ func updateAllCIDRs() string {
 			return "[WARN] " + tr("s.github_unavail")
 		}
 	}
-	active := loadRoutes()
-	am := make(map[string]bool)
-	for _, s := range active {
-		am[s] = true
-	}
-	var out string
 	for _, s := range services {
-		if !am[s.Name] {
-			continue
-		}
 		cidrData, err := fetchServiceCIDR(s.Name)
 		if err != nil {
 			if cached := loadCIDRCache(s.Name); cached != "" {
-				out += fmt.Sprintf("[✓] %s: %s (%d)\n", s.Name, tr("s.cached"), countCIDRs(cached))
+				totalCIDRs += countCIDRs(cached)
+				totalCache++
 			}
 			continue
 		}
 		saveCIDRCache(s.Name, cidrData)
-		out += fmt.Sprintf("[✓] %s: %s %d\n", s.Name, tr("s.loaded"), countCIDRs(cidrData))
+		totalCIDRs += countCIDRs(cidrData)
+		totalOK++
 	}
+	out := fmt.Sprintf("[✓] Loaded CIDRs for %d services (%d total networks)", totalOK+totalCache, totalCIDRs)
 	if allFromCache {
-		out = "[WARN] " + tr("s.github_unavail") + "\n" + out
+		out = "[WARN] GitHub unavailable, using cache\n" + out
 	}
 	return out
 }
@@ -1275,7 +1271,7 @@ label.service input{margin:0;width:13px;height:13px;cursor:pointer}
     <div class="svc-list" style="display:flex;flex-wrap:wrap;gap:2px">__SERVICES__</div>
     <div class="flex mt">
       <button class="btn btn-save" name="cmd" value="save-services" onclick="saveServices()">__L_BTN_SAVE__</button>
-      <button type="button" class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>
+      <button type="button" class="btn btn-routes" onclick="loadAllRoutes()">__L_BTN_LOAD__</button>
     </div>
   </div>
 
@@ -1443,6 +1439,14 @@ function cmdRestart() {
 }
 function cmdShow() { fetchCmd('/api/show'); }
 function cmdRoutes() { fetchCmd('/api/routes-force'); }
+
+function loadAllRoutes() {
+    document.querySelectorAll(".tab").forEach(function(t){t.classList.remove("active")});
+    document.querySelectorAll(".tab-content").forEach(function(t){t.classList.remove("active")});
+    document.querySelector('[data-tab="control"]').classList.add("active");
+    document.getElementById("tab-control").classList.add("active");
+    fetchCmd('/api/update-cidr');
+}
 
 function saveServices() {
     var cb = document.querySelectorAll('.svc-list input[type=checkbox]:checked');

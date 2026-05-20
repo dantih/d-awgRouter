@@ -633,19 +633,8 @@ func showInterface(iface string) (string, error) {
 }
 
 func isInterfaceAlive(iface string) bool {
-	// Проверяем что интерфейс существует И его IP соответствует нашему конфигу
 	out, _ := exec.Command("ifconfig", iface).Output()
-	if len(out) == 0 {
-		return false
-	}
-	// Дополнительно: проверяем что на интерфейсе есть WG/AWG процесс
-	cfg := getCurrentConfig()
-	if cfg != nil {
-		ip := strings.Split(cfg.Address, "/")[0]
-		return strings.Contains(string(out), "inet "+ip)
-	}
-	// Если конфига нет — интерфейс не наш
-	return false
+	return len(out) > 0
 }
 
 // === Sudo ===
@@ -831,12 +820,21 @@ func cmdUp() string {
 		return "[ERROR] " + tr("s.config_needed")
 	}
 
-	// Если уже активен — просто шоу
+	// Если уже активен наш интерфейс — просто шоу
 	if iface := findActiveInterface(); iface != "" && isInterfaceAlive(iface) {
-		out := fmt.Sprintf("[✓] %s %s\n", tr("s.already_up"), iface)
-		so, _ := showInterface(iface)
-		out += so
-		return out
+		// Перепроверяем, что это наш интерфейс: проверим IP
+		if info, _ := exec.Command("ifconfig", iface).Output(); len(info) > 0 {
+			ip := strings.Split(cfg.Address, "/")[0]
+			if !strings.Contains(string(info), "inet "+ip) {
+				// IP не совпадает — это не наш интерфейс, чистим state
+				clearState()
+			} else {
+				out := fmt.Sprintf("[✓] %s %s\n", tr("s.already_up"), iface)
+				so, _ := showInterface(iface)
+				out += so
+				return out
+			}
+		}
 	}
 
 	// Убиваем что могло остаться

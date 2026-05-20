@@ -840,6 +840,26 @@ func saveState(iface, ip string) {
 }
 func clearState() { os.Remove(statePath()) }
 
+func saveOrigServiceCIDRs() {
+	origPath := filepath.Join(stateDir, "orig_allowed_ips")
+	if _, err := os.Stat(origPath); os.IsNotExist(err) {
+		// Временно отключаем FT-проверку в loadAllCIDRs, чтобы сохранить реальные маршруты
+		var all []string
+		for _, s := range loadRoutes() {
+			if d := loadCIDRCache(s); d != "" {
+				all = append(all, d)
+			}
+		}
+		if userCIDRs := loadActiveUserCIDRs(); userCIDRs != "" {
+			all = append(all, userCIDRs)
+		}
+		routes := strings.Join(all, " ")
+		if routes != "" {
+			os.WriteFile(origPath, []byte(routes), 0644)
+		}
+	}
+}
+
 func reloadWithAllowedIPs(allowedIPs string) string {
 	iface := findActiveInterface()
 	if iface == "" {
@@ -852,13 +872,9 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 
 	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
 
-	// При включении FT сохраняем текущие сервисные CIDR (а не конфиг AllowedIPs)
+	// При включении FT сохраняем текущие сервисные CIDR (до смены AllowedIPs)
 	if isFullTunnel {
-		origPath := filepath.Join(stateDir, "orig_allowed_ips")
-		if _, err := os.Stat(origPath); os.IsNotExist(err) {
-			routes := loadAllCIDRs()
-			os.WriteFile(origPath, []byte(routes), 0644)
-		}
+		saveOrigServiceCIDRs()
 	}
 
 	// Меняем AllowedIPs и применяем через setconf

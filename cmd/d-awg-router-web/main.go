@@ -670,25 +670,6 @@ func updateRoutes(iface, cidrs string) {
 }
 
 
-func removeRoutesByInterface(iface string) {
-	if iface == "" {
-		return
-	}
-	// Удаляем маршруты сервисов с указанного интерфейса
-	for _, s := range loadRoutes() {
-		for _, c := range strings.Fields(loadCIDRCache(s)) {
-			sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
-		}
-	}
-	for _, u := range loadUserRoutes() {
-		if u.Active {
-			for _, c := range u.CIDRs {
-				sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
-			}
-		}
-	}
-}
-
 func removeAllRoutes() {
 	iface := findActiveInterface()
 	if iface == "" {
@@ -868,7 +849,6 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 	if cfg == nil {
 		return "[ERROR] no current config"
 	}
-	ip := strings.Split(cfg.Address, "/")[0]
 
 	// Сохраняем оригинальный AllowedIPs (если не сохранили)
 	origPath := filepath.Join(stateDir, "orig_allowed_ips")
@@ -876,21 +856,10 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 		os.WriteFile(origPath, []byte(cfg.AllowedIPs), 0644)
 	}
 
-	// Сохраняем текущий default gateway (original router, не через utun)
-	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
-	if isFullTunnel {
-		defPath := filepath.Join(stateDir, "orig_default_gw")
-		if _, err := os.Stat(defPath); os.IsNotExist(err) {
-			out, _ := exec.Command("sh", "-c", "netstat -rn -f inet | awk '/^default/ {print $2; exit}'").Output()
-			if len(out) > 0 {
-				os.WriteFile(defPath, bytes.TrimSpace(out), 0644)
-			}
-		}
-	}
-
-	// Меняем AllowedIPs
+	// Меняем AllowedIPs и применяем через setconf
+	// WG на macOS сам добавит/удалит маршруты на основе AllowedIPs
+	// Не трогаем default route и маршруты других VPN
 	cfg.AllowedIPs = allowedIPs
-	// Пишем временный конфиг и применяем через setconf
 	kernConf := filepath.Join(configsDir, "._ft_setconf")
 	cfg.SaveKernelConfig(kernConf)
 	if cfg.IsWireGuard {
@@ -899,44 +868,13 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 		sudo(awgBin, "setconf", iface, kernConf)
 	}
 	os.Remove(kernConf)
-	time.Sleep(1 * time.Second)
 
-	// При full tunnel меняем default route на интерфейс VPN
+	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
 	if isFullTunnel {
-		// Удаляем старые маршруты сервисов с этим интерфейсом
-		removeRoutesByInterface(iface)
-		// Меняем default на шлюз интерфейса (через хост-маршрут)
-		// Для macOS p2p utun: default route ставим через ip интерфейса как gateway
-		sudo("route", "-q", "-n", "change", "default", ip)
-		return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (All Traffic via %s)", iface, ip)
-	} else {
-		// Восстанавливаем оригинальный default gateway
-		defPath := filepath.Join(stateDir, "orig_default_gw")
-		if data, err := os.ReadFile(defPath); err == nil {
-			orgw := strings.TrimSpace(string(data))
-			if orgw != "" {
-				sudo("route", "-q", "-n", "change", "default", orgw)
-			}
-			os.Remove(defPath)
-		}
-		// Применяем оригинальные маршруты через updateRoutes (не full tunnel)
-		routes := loadAllCIDRs()
-		if routes != "" {
-			updateRoutes(iface, routes)
-		}
-		return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (%d " + tr("s.nets") + ")", iface, countCIDRs(routes))
+		return fmt.Sprintf("[\u2713] %s All Traffic", iface)
 	}
-}
-
-func restoreOriginalDefaultGW() {
-	defPath := filepath.Join(stateDir, "orig_default_gw")
-	if data, err := os.ReadFile(defPath); err == nil {
-		orgw := strings.TrimSpace(string(data))
-		if orgw != "" {
-			sudo("route", "-q", "-n", "change", "default", orgw)
-		}
-		os.Remove(defPath)
-	}
+	routes := loadAllCIDRs()
+	return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (%d " + tr("s.nets") + ")", iface, countCIDRs(routes))
 }
 
 func restoreOriginalAllowedIPs() string {
@@ -956,10 +894,7 @@ func cmdDown() string {
 	if iface == "" {
 		return "[!] " + tr("s.none_active")
 	}
-	// Если включён Full Tunnel — восстанавливаем оригинальный AllowedIPs и default gateway
-	if isFullTunnel() {
-		restoreOriginalDefaultGW()
-	}
+
 	removeAllRoutes()
 
 	// Убиваем процесс (wireguard-go или amneziawg-go)

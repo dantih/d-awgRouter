@@ -891,12 +891,36 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 	os.Remove(kernConf)
 
 	// На macOS wg setconf не обновляет маршруты в System Extension — добавляем/удаляем default вручную
+	// Сохраняем оригинальный gateway из default маршрута перед изменениями
+	origGW := ""
+	origIface := ""
+	if out, err := exec.Command("netstat", "-rn", "-f", "inet").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "default") {
+				fields := strings.Fields(line)
+				if len(fields) >= 4 {
+					origGW = fields[1]
+					origIface = fields[len(fields)-1]
+				}
+			}
+		}
+	}
 	if isFullTunnel {
-		sudo("route", "add", "-interface", "default", iface)
+		// Сначала добавляем exclude-маршрут до известных подсетей (YC 10.10.10.0/24 и локальная сеть)
+		if origGW != "" && origIface != "" {
+			// Сохраняем orig gateway в state (для disable FT)
+			os.WriteFile(filepath.Join(stateDir, "orig_default_gw"), []byte(origGW+" "+origIface), 0644)
+			// Добавляем маршрут до нашей подсети через оригинальный gateway (чтоб SSH не упал)
+			sudo("route", "-n", "add", "-net", "10.10.10.0", "-netmask", "255.255.255.0", origGW)
+		}
+		// Добавляем default через WG интерфейс
+		sudo("route", "-n", "add", "-net", "0.0.0.0", "-netmask", "0.0.0.0", "-interface", iface)
 		return fmt.Sprintf("[\u2713] %s All Traffic", iface)
 	}
-	// При выключении FT — удаляем default через utun и ждём восстановления через setconf
-	sudo("route", "delete", "-interface", "default", iface)
+	// При выключении FT — удаляем default и exclude-маршруты
+	sudo("route", "-n", "delete", "-net", "0.0.0.0", "-netmask", "0.0.0.0")
+	sudo("route", "-n", "delete", "-net", "10.10.10.0", "-netmask", "255.255.255.0")
+	os.Remove(filepath.Join(stateDir, "orig_default_gw"))
 	routes := loadAllCIDRs()
 	return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (%d " + tr("s.nets") + ")", iface, countCIDRs(routes))
 }

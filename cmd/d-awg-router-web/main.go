@@ -1058,8 +1058,19 @@ func cmdRoutesForce() string {
 
 func updateAllCIDRs() string {
 	services, err := fetchServiceList()
+	allFromCache := false
 	if err != nil {
-		return "[WARN] " + tr("s.github_unavail")
+		// GitHub недоступен — пробуем из кэша
+		allFromCache = true
+		services = nil
+		for _, s := range loadRoutes() {
+			if cached := loadCIDRCache(s); cached != "" {
+				services = append(services, ServiceInfo{Name: s})
+			}
+		}
+		if len(services) == 0 {
+			return "[WARN] " + tr("s.github_unavail")
+		}
 	}
 	active := loadRoutes()
 	am := make(map[string]bool)
@@ -1080,6 +1091,9 @@ func updateAllCIDRs() string {
 		}
 		saveCIDRCache(s.Name, cidrData)
 		out += fmt.Sprintf("[✓] %s: %s %d\n", s.Name, tr("s.loaded"), countCIDRs(cidrData))
+	}
+	if allFromCache {
+		out = "[WARN] " + tr("s.github_unavail") + "\n" + out
 	}
 	return out
 }

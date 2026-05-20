@@ -613,32 +613,12 @@ func findWireGuardGo() string {
 }
 
 func findActiveInterface() string {
-	// Сначала читаем из сохранённого состояния (наш интерфейс)
+	// Возвращаем только интерфейс, который принадлежит нашему сервису
 	if data, err := os.ReadFile(statePath()); err == nil {
 		var st State
 		if json.Unmarshal(data, &st) == nil && st.Interface != "" {
 			if isInterfaceAlive(st.Interface) {
 				return st.Interface
-			}
-		}
-	}
-	// Fallback: пробуем wg
-	if out, err := sudo(wgBin, "show"); err == nil {
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(line, "interface: ") {
-				iface := strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
-				// Не трогаем utun6 (штатный WG)
-				if iface != "utun6" {
-					return iface
-				}
-			}
-		}
-	}
-	// Fallback: пробуем awg
-	if out, err := sudo(awgBin, "show"); err == nil {
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(line, "interface: ") {
-				return strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
 			}
 		}
 	}
@@ -653,8 +633,19 @@ func showInterface(iface string) (string, error) {
 }
 
 func isInterfaceAlive(iface string) bool {
-	out, _ := showInterface(iface)
-	return len(out) > 0
+	// Проверяем что интерфейс существует И его IP соответствует нашему конфигу
+	out, _ := exec.Command("ifconfig", iface).Output()
+	if len(out) == 0 {
+		return false
+	}
+	// Дополнительно: проверяем что на интерфейсе есть WG/AWG процесс
+	cfg := getCurrentConfig()
+	if cfg != nil {
+		ip := strings.Split(cfg.Address, "/")[0]
+		return strings.Contains(string(out), "inet "+ip)
+	}
+	// Если конфига нет — интерфейс не наш
+	return false
 }
 
 // === Sudo ===

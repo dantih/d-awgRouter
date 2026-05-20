@@ -1014,6 +1014,14 @@ func cmdRoutesForce() string {
 	if isFullTunnel() {
 		return reloadWithAllowedIPs("0.0.0.0/0, ::/0")
 	}
+	// Если full tunnel выключен, но AllowedIPs ещё 0.0.0.0/0 — восстанавливаем
+	origPath := filepath.Join(stateDir, "orig_allowed_ips")
+	if data, err := os.ReadFile(origPath); err == nil {
+		orig := strings.TrimSpace(string(data))
+		if orig != "" {
+			return reloadWithAllowedIPs(orig)
+		}
+	}
 	routes := loadAllCIDRs()
 	if routes == "" {
 		return "[!] " + tr("s.no_services")

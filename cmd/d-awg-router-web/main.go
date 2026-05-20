@@ -1328,6 +1328,11 @@ var fullTunnelState = false;
 
 function toggleFullTunnel() {
     var cb = document.getElementById("full-tunnel");
+    // Переключаемся на вкладку Control
+    document.querySelectorAll(".tab").forEach(function(t){t.classList.remove("active")});
+    document.querySelectorAll(".tab-content").forEach(function(t){t.classList.remove("active")});
+    document.querySelector('[data-tab="control"]').classList.add("active");
+    document.getElementById("tab-control").classList.add("active");
     fetch("/api/full-tunnel", {
         method: "POST",
         headers: {"Content-Type": "application/json"},

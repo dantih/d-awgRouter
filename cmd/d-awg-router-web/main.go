@@ -1270,13 +1270,11 @@ label.service input{margin:0;width:13px;height:13px;cursor:pointer}
   <!-- GitHub Services -->
   <div class="card flat">
     <h2 style="font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;letter-spacing:0.5px">GitHub Services</h2>
-    <form method="post" class="flex" style="flex-direction:column" onsubmit="showSpinner('output'); return true;">
-      <div class="svc-list" style="display:flex;flex-wrap:wrap;gap:2px">__SERVICES__</div>
-      <div class="flex mt">
-        <button class="btn btn-save" name="cmd" value="save-services">__L_BTN_SAVE__</button>
-        <button class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>
-      </div>
-    </form>
+    <div class="svc-list" style="display:flex;flex-wrap:wrap;gap:2px">__SERVICES__</div>
+    <div class="flex mt">
+      <button class="btn btn-save" name="cmd" value="save-services" onclick="saveServices()">__L_BTN_SAVE__</button>
+      <button type="button" class="btn btn-routes" onclick="fetchCmd('/api/update-cidr')">__L_BTN_LOAD__</button>
+    </div>
   </div>
 
   <!-- Custom Routes -->
@@ -1443,6 +1441,19 @@ function cmdRestart() {
 }
 function cmdShow() { fetchCmd('/api/show'); }
 function cmdRoutes() { fetchCmd('/api/routes-force'); }
+
+function saveServices() {
+    var cb = document.querySelectorAll('.svc-list input[type=checkbox]:checked');
+    var names = [];
+    cb.forEach(function(el) { names.push(el.value); });
+    var x = new XMLHttpRequest();
+    x.open('POST', '/api/save-services', true);
+    x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    x.onload = function() {
+        fetchCmd('/api/update-cidr');
+    };
+    x.send('services=' + encodeURIComponent(names.join(',')));
+}
 
 // Config management
 var currentConfig = '__CURRENT_CFG__';
@@ -1760,6 +1771,27 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			respondJSON(w, map[string]string{"error": "method not allowed"})
+		case "/save-services":
+			if r.Method != "POST" {
+				respondJSON(w, map[string]string{"error": "POST required"})
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			vals, _ := url.ParseQuery(string(body))
+			svcs := strings.Split(vals.Get("services"), ",")
+			// Чистим routes/
+			entries, _ := os.ReadDir(routesDir)
+			for _, e := range entries {
+				if !e.IsDir() {
+					os.Remove(filepath.Join(routesDir, e.Name()))
+				}
+			}
+			for _, s := range svcs {
+				if s != "" {
+					setRoute(s, true)
+				}
+			}
+			respondJSON(w, map[string]string{"status": "ok"})
 		default:
 			handleAPI(w, r)
 		}

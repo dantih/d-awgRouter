@@ -1327,10 +1327,12 @@ function toggleFullTunnel() {
             fullTunnelState = cb.checked;
             applyFullTunnelUI(cb.checked);
             showSpinner("output");
-            fetchCmd("/api/routes-force");
+            fetchCmd("/api/routes-force", function() {
+                refreshStatusBar();
+            });
         }
     });
-}
+};
 
 function applyFullTunnelUI(enabled) {
     var containers = document.querySelectorAll("#tab-services");
@@ -1375,7 +1377,7 @@ function updateStatusBar(st) {
   document.getElementById('status-dot').className = 'status-dot '+(st.vpnActive?'green':'red');
   document.getElementById('status-text').textContent = st.vpnActive ? '__L_STATUS_ONLINE__' : '__L_STATUS_OFFLINE__';
   document.getElementById('iface-text').textContent = st.interface || '—';
-  document.getElementById('routes-text').textContent = st.routeCount + ' routes';
+  document.getElementById('routes-text').textContent = st.fullTunnel ? 'All Traffic' : (st.routeCount + ' routes');
   document.getElementById('btn-up').disabled = st.upDisabled;
   document.getElementById('btn-down').disabled = st.downDisabled;
   document.getElementById('btn-restart').disabled = !st.vpnActive;
@@ -1394,7 +1396,7 @@ function refreshStatusBar() {
   s.send();
 }
 
-function fetchCmd(url) {
+function fetchCmd(url, onDone) {
   var dots = 0;
   document.getElementById('output').innerHTML = '<pre>Executing';
   var d = setInterval(function(){
@@ -1407,6 +1409,7 @@ function fetchCmd(url) {
     clearInterval(d);
     document.getElementById('output').innerHTML = '<pre>'+escHtml(x.responseText)+'</pre>';
     refreshStatusBar();
+    if (onDone) onDone();
   };
   x.onerror = function() {
     clearInterval(d);
@@ -1704,26 +1707,22 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			iface := findActiveInterface()
 			cidrs := loadAllCIDRs()
 			routeCount := countCIDRs(cidrs)
-			userRoutes := loadUserRoutes()
-			activeUsers := 0
-			for _, u := range userRoutes {
-				if u.Active {
-					activeUsers++
-				}
-			}
+			fullTunnel := isFullTunnel()
 			vpnActive := iface != ""
 			j, _ := json.Marshal(struct {
-				VPNActive    bool `json:"vpnActive"`
+				VPNActive    bool   `json:"vpnActive"`
 				Interface    string `json:"interface"`
 				RouteCount   int    `json:"routeCount"`
 				UpDisabled   bool   `json:"upDisabled"`
 				DownDisabled bool   `json:"downDisabled"`
+				FullTunnel   bool   `json:"fullTunnel"`
 			}{
 				VPNActive:    vpnActive,
 				Interface:    iface,
 				RouteCount:   routeCount,
 				UpDisabled:   vpnActive,
 				DownDisabled: !vpnActive,
+				FullTunnel:   fullTunnel,
 			})
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(j)
@@ -1843,19 +1842,23 @@ func showPage(w http.ResponseWriter, output string) {
 		ifaceStr = iface
 		downDisabled = ""
 		restartDisabled = ""
-		// считаем маршруты
-		routeCount := 0
-		routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
-		for _, line := range strings.Split(string(routeOut), "\n") {
-			if strings.Contains(line, iface) {
-				routeCount++
+		if isFullTunnel() {
+			routesStr = "All Traffic"
+		} else {
+			// считаем маршруты
+			routeCount := 0
+			routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
+			for _, line := range strings.Split(string(routeOut), "\n") {
+				if strings.Contains(line, iface) {
+					routeCount++
+				}
 			}
+			// subtract default route (0.0.0.0/1 via tun)
+			if routeCount > 0 {
+				routeCount--
+			}
+			routesStr = fmt.Sprintf("%d routes", routeCount)
 		}
-		// subtract default route (0.0.0.0/1 via tun)
-		if routeCount > 0 {
-			routeCount--
-		}
-		routesStr = fmt.Sprintf("%d routes", routeCount)
 		if loadAllCIDRs() != "" {
 			routesDisabled = ""
 		}

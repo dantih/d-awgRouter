@@ -2150,6 +2150,11 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		respondJSON(w, map[string]string{"message": "Route deleted"})
 
+	case "/routes-force":
+		result := cmdRoutesForce()
+		respondJSON(w, map[string]string{"result": result})
+		return
+
 	case "/user-route/toggle":
 		r.ParseForm()
 		name := r.FormValue("name")

@@ -1341,7 +1341,6 @@ function toggleFullTunnel() {
         if (d.status === "ok") {
             fullTunnelState = cb.checked;
             applyFullTunnelUI(cb.checked);
-            showSpinner("output");
             fetchCmd("/api/routes-force", function() {
                 refreshStatusBar();
             });

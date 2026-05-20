@@ -34,7 +34,7 @@ var (
 	activeCfg  string // имя активного конфига
 	langName   string // текущий язык "en" или "ru"
 	lang       LangMap
-	appVersion string
+	appVersion = "0.0.0-dev" // overridden by -ldflags or version.txt
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
@@ -87,14 +87,16 @@ func init() {
 	for _, d := range []string{configsDir, cacheDir, routesDir, userRoutesDir, stateDir} {
 		os.MkdirAll(d, 0755)
 	}
-	// Загрузка версии (из ~/.d-awg-router/version.txt с фолбэком на version.txt рядом с бинарником)
-	verPath := filepath.Join(awgDir, "version.txt")
-	if data, err := os.ReadFile(verPath); err == nil {
-		appVersion = strings.TrimSpace(string(data))
-	} else if exe, err := os.Executable(); err == nil {
-		verPath := filepath.Join(filepath.Dir(exe), "version.txt")
+	// Загрузка версии (ldflags > ~/.d-awg-router/version.txt > version.txt рядом с бинарником)
+	if appVersion == "0.0.0-dev" {
+		verPath := filepath.Join(awgDir, "version.txt")
 		if data, err := os.ReadFile(verPath); err == nil {
 			appVersion = strings.TrimSpace(string(data))
+		} else if exe, err := os.Executable(); err == nil {
+			verPath := filepath.Join(filepath.Dir(exe), "version.txt")
+			if data, err := os.ReadFile(verPath); err == nil {
+				appVersion = strings.TrimSpace(string(data))
+			}
 		}
 	}
 	// Загрузка языка

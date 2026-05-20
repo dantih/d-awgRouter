@@ -880,8 +880,6 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 	}
 
 	// Меняем AllowedIPs и применяем через setconf
-	// WG на macOS сам добавит/удалит маршруты на основе AllowedIPs
-	// Не трогаем default route и маршруты других VPN
 	cfg.AllowedIPs = allowedIPs
 	kernConf := filepath.Join(configsDir, "._ft_setconf")
 	cfg.SaveKernelConfig(kernConf)
@@ -892,9 +890,13 @@ func reloadWithAllowedIPs(allowedIPs string) string {
 	}
 	os.Remove(kernConf)
 
+	// На macOS wg setconf не обновляет маршруты в System Extension — добавляем/удаляем default вручную
 	if isFullTunnel {
+		sudo("route", "add", "-interface", "default", iface)
 		return fmt.Sprintf("[\u2713] %s All Traffic", iface)
 	}
+	// При выключении FT — удаляем default через utun и ждём восстановления через setconf
+	sudo("route", "delete", "-interface", "default", iface)
 	routes := loadAllCIDRs()
 	return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (%d " + tr("s.nets") + ")", iface, countCIDRs(routes))
 }

@@ -950,25 +950,108 @@ func saveFTExcludeRoutes(routes []string) {
 
 func clearFTExcludeRoutes() { os.Remove(ftExcludeRoutesPath()) }
 
-// reloadFTEnabled включает Full Tunnel: default через WG + exclude-маршруты + DNS
+// === scutil helpers ===
+
+// runScutil выполняет команду через scutil (System Configuration)
+func runScutil(script string) string {
+	out, _ := exec.Command("scutil").Output()
+	_ = out
+	// Используем stdin pipe для scutil
+	cmd := exec.Command("sudo", "scutil")
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, script)
+	}()
+	data, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// generateUUID генерирует UUID для Service ID
+func generateUUID() string {
+	out, _ := exec.Command("uuidgen").Output()
+	return strings.TrimSpace(string(out))
+}
+
+// ftServiceUUIDPath сохраняет UUID сервиса для отключения
+func ftServiceUUIDPath() string { return filepath.Join(stateDir, "ft_service_uuid") }
+
+func saveFTServiceUUID(uuid string) {
+	os.WriteFile(ftServiceUUIDPath(), []byte(uuid), 0644)
+}
+
+func loadFTServiceUUID() string {
+	data, _ := os.ReadFile(ftServiceUUIDPath())
+	return strings.TrimSpace(string(data))
+}
+
+func clearFTServiceUUID() { os.Remove(ftServiceUUIDPath()) }
+
+// getWGInterfaceIP возвращает IP адрес WG интерфейса
+func getWGInterfaceIP(iface string) string {
+	out, _ := exec.Command("ifconfig", iface).Output()
+	re := regexp.MustCompile(`inet (\d+\.\d+\.\d+\.\d+)`)
+	m := re.FindStringSubmatch(string(out))
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+// reloadFTEnabled включает Full Tunnel: регистрирует сервис в System Configuration (как utun5/utun6)
 func reloadFTEnabled(iface string) string {
+	// Получаем IP интерфейса
+	wgIP := getWGInterfaceIP(iface)
+	if wgIP == "" {
+		return "[ERROR] cannot get IP for " + iface
+	}
+
+	// Генерируем UUID для сервиса
+	svcUUID := generateUUID()
+
+	// Генерируем scutil скрипт для регистрации сервиса
+	script := fmt.Sprintf(`d.init
+# Отмечаем как Primary с наивысшим приоритетом
+set State:/Network/Service/%s
+
+d.init
+d.add InterfaceName %s
+d.add ConfirmedServiceID %s
+d.add ServerAddresses * 1.1.1.1
+d.add SupplementalMatchDomains * 
+set State:/Network/Service/%s/DNS
+
+d.init
+d.add Addresses * %s
+d.add DestAddresses * %s
+set State:/Network/Interface/%s/IPv4
+
+d.init
+d.add PrimaryService %s
+d.add PrimaryInterface %s
+d.add Router %s
+set State:/Network/Global/IPv4
+`, svcUUID, iface, svcUUID, svcUUID, wgIP, wgIP, iface, svcUUID, iface, wgIP)
+
+	// Добавляем exclude-маршруты (WG endpoint, SSH, локальная сеть)
 	origGW, origIface := getOrigDefault()
 	if origGW == "" || origIface == "" {
 		return "[ERROR] no non-VPN default gateway found"
 	}
 
-	// Сохраняем оригинальный gateway
 	os.WriteFile(filepath.Join(stateDir, "orig_default_gw"), []byte(origGW+" "+origIface), 0644)
 
-	// Собираем exclude-маршруты (должны остаться через en0/local GW)
 	var excludeCIDRs []string
 
-	// 1. Локальная сеть оригинального интерфейса
+	// Локальная сеть
 	if subnet := getIfaceSubnet(origIface); subnet != "" {
 		excludeCIDRs = append(excludeCIDRs, subnet)
 	}
 
-	// 2. SSH клиент (если виден) — host-маршрут /32
+	// SSH клиент
 	if sshNet := getSSHClientSubnet(); sshNet != "" {
 		covered := false
 		for _, c := range excludeCIDRs {
@@ -982,24 +1065,24 @@ func reloadFTEnabled(iface string) string {
 		}
 	}
 
-	// 3. WG endpoint — иначе default через utunX убьёт SSH
-	if wgIP := getWGEndpointIP(); wgIP != "" {
+	// WG endpoint
+	if wgEp := getWGEndpointIP(); wgEp != "" {
 		covered := false
 		for _, c := range excludeCIDRs {
-			if wgIP == c {
+			if wgEp == c {
 				covered = true
 				break
 			}
 		}
 		if !covered {
-			excludeCIDRs = append(excludeCIDRs, wgIP)
+			excludeCIDRs = append(excludeCIDRs, wgEp)
 		}
 	}
 
-	// 4. link-local всегда
+	// link-local
 	excludeCIDRs = append(excludeCIDRs, "169.254.0.0/16")
 
-	// Удаляем дубликаты
+	// Уникальные
 	seen := make(map[string]bool)
 	var unique []string
 	for _, c := range excludeCIDRs {
@@ -1010,7 +1093,7 @@ func reloadFTEnabled(iface string) string {
 	}
 	excludeCIDRs = unique
 
-	// Добавляем exclude-маршруты через оригинальный GW
+	// Добавляем exclude-маршруты через orig GW
 	for _, cidr := range excludeCIDRs {
 		_, ipnet, _ := net.ParseCIDR(cidr)
 		if ipnet != nil {
@@ -1020,35 +1103,51 @@ func reloadFTEnabled(iface string) string {
 		}
 	}
 
-	// Сохраняем exclude-маршруты для отключения
 	saveFTExcludeRoutes(excludeCIDRs)
+	saveFTServiceUUID(svcUUID)
 
-	// Default route через WG интерфейс
-	sudo("route", "-n", "add", "-net", "0.0.0.0", "-netmask", "0.0.0.0", "-interface", iface)
-
-	// DNS через WG (1.1.1.1, 8.8.4.4)
-	saveOrigDNS()
-	if origIface == "en0" || origIface == "en1" {
-		// Определяем имя сервиса для Wi-Fi
-		svcName := getWiFiServiceName()
-		if svcName != "" {
-			sudo("networksetup", "-setdnsservers", svcName, "1.1.1.1", "8.8.4.4")
-		}
+	// Выполняем scutil скрипт
+	cmd := exec.Command("sudo", "scutil")
+	stdin, _ := cmd.StdinPipe()
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, script)
+	}()
+	if out, err := cmd.Output(); err != nil {
+		return fmt.Sprintf("[!] scutil error: %s", string(out))
 	}
 
-	return fmt.Sprintf("[\u2713] %s All Traffic (%d exclude routes)", iface, len(excludeCIDRs))
+	_ = script
+	_ = wgIP
+
+	// DNS через scutil (уже сделано в скрипте выше)
+	saveOrigDNS()
+
+	return fmt.Sprintf("[\u2713] %s All Traffic via scutil", iface)
 }
 
-// reloadFTDisabled отключает Full Tunnel: удаляет default, exclude, DNS
+// reloadFTDisabled отключает Full Tunnel: удаляет service из System Configuration
 func reloadFTDisabled(iface string) string {
-	var errors []string
+	svcUUID := loadFTServiceUUID()
+	if svcUUID != "" {
+		script := fmt.Sprintf(`d.init
+remove State:/Network/Service/%s
+remove State:/Network/Service/%s/DNS
+remove State:/Network/Interface/%s/IPv4
+`, svcUUID, svcUUID, iface)
 
-	// 1. Удаляем default route через WG
-	if _, err := sudo("route", "-n", "delete", "-net", "0.0.0.0", "-netmask", "0.0.0.0"); err != nil {
-		errors = append(errors, "delete default: "+err.Error())
+		cmd := exec.Command("sudo", "scutil")
+		stdin, _ := cmd.StdinPipe()
+		go func() {
+			defer stdin.Close()
+			io.WriteString(stdin, script)
+		}()
+		cmd.Output()
+
+		// macOS автоматически восстановит en0 как Primary
 	}
 
-	// 2. Удаляем exclude-маршруты
+	// Удаляем exclude-маршруты
 	for _, cidr := range loadFTExcludeRoutes() {
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
@@ -1059,33 +1158,13 @@ func reloadFTDisabled(iface string) string {
 		sudo("route", "-n", "delete", "-net", first, "-netmask", mask)
 	}
 
-	// 3. Восстанавливаем DNS
+	// Восстанавливаем DNS
 	restoreOrigDNS()
 
-	// 4. Чистим state
+	// Чистим state
 	os.Remove(filepath.Join(stateDir, "orig_default_gw"))
 	clearFTExcludeRoutes()
-
-	// 5. Если были ошибки с удалением default — перезагружаем интерфейс
-	if len(errors) > 0 {
-		// Fallback: cmdDown + cmdUp перезапустит интерфейс с сервисными CIDR
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			// Проверяем, не остался ли default через WG
-			if out, _ := exec.Command("netstat", "-rn", "-f", "inet").Output(); len(out) > 0 {
-				for _, line := range strings.Split(string(out), "\n") {
-					if strings.Contains(line, "default") && strings.Contains(line, iface) {
-						// Default всё ещё через WG — перезагружаем интерфейс
-						cmdDown()
-						time.Sleep(2 * time.Second)
-						cmdUp()
-						break
-					}
-				}
-			}
-		}()
-		return fmt.Sprintf("[!] %s FT disable (fallback restart scheduled, errors: %s)", iface, strings.Join(errors, "; "))
-	}
+	clearFTServiceUUID()
 
 	routes := loadAllCIDRs()
 	return fmt.Sprintf("[\u2713] %s "+tr("s.updated")+" (%d "+tr("s.nets")+")", iface, countCIDRs(routes))

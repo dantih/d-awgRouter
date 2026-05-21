@@ -902,7 +902,6 @@ func getOrigDefault() (string, string) {
 func getSSHClientSubnet() string {
 	client := os.Getenv("SSH_CLIENT")
 	if client == "" {
-		// Fallback: берём первый адрес из netstat для интерфейса без default
 		return ""
 	}
 	parts := strings.Fields(client)
@@ -913,9 +912,26 @@ func getSSHClientSubnet() string {
 	if ip == nil {
 		return ""
 	}
-	// Используем /24 подсеть от SSH клиента
-	network := ip.Mask(net.CIDRMask(24, 32))
-	return fmt.Sprintf("%s/24", network.String())
+	// Используем /32 host-маршрут для SSH клиента
+	return fmt.Sprintf("%s/32", ip.String())
+}
+
+// getWGEndpointIP возвращает IP адрес WG endpoint из активного конфига
+func getWGEndpointIP() string {
+	cfg := getCurrentConfig()
+	if cfg == nil {
+		return ""
+	}
+	endpoint := cfg.Endpoint
+	// Может быть host:port или ip:port
+	if idx := strings.LastIndex(endpoint, ":"); idx > 0 {
+		endpoint = endpoint[:idx]
+	}
+	ip := net.ParseIP(endpoint).To4()
+	if ip == nil {
+		return ""
+	}
+	return ip.String() + "/32"
 }
 
 func ftExcludeRoutesPath() string { return filepath.Join(stateDir, "ft_exclude_routes") }
@@ -952,9 +968,8 @@ func reloadFTEnabled(iface string) string {
 		excludeCIDRs = append(excludeCIDRs, subnet)
 	}
 
-	// 2. SSH клиентская подсеть (если видна)
+	// 2. SSH клиент (если виден) — host-маршрут /32
 	if sshNet := getSSHClientSubnet(); sshNet != "" {
-		// Не добавляем если уже покрывается локальной подсетью
 		covered := false
 		for _, c := range excludeCIDRs {
 			if sshNet == c {
@@ -967,7 +982,21 @@ func reloadFTEnabled(iface string) string {
 		}
 	}
 
-	// 3. link-local всегда
+	// 3. WG endpoint — иначе default через utunX убьёт SSH
+	if wgIP := getWGEndpointIP(); wgIP != "" {
+		covered := false
+		for _, c := range excludeCIDRs {
+			if wgIP == c {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			excludeCIDRs = append(excludeCIDRs, wgIP)
+		}
+	}
+
+	// 4. link-local всегда
 	excludeCIDRs = append(excludeCIDRs, "169.254.0.0/16")
 
 	// Удаляем дубликаты

@@ -483,9 +483,6 @@ func setFullTunnel(enabled bool) {
 }
 
 func loadAllCIDRs() string {
-	if isFullTunnel() {
-		return "0.0.0.0/0, ::/0"
-	}
 	var all []string
 	for _, s := range loadRoutes() {
 		if d := loadCIDRCache(s); d != "" {
@@ -842,102 +839,50 @@ func saveState(iface, ip string) {
 }
 func clearState() { os.Remove(statePath()) }
 
-func saveOrigServiceCIDRs() {
-	origPath := filepath.Join(stateDir, "orig_allowed_ips")
-	if _, err := os.Stat(origPath); os.IsNotExist(err) {
-		// Временно отключаем FT-проверку в loadAllCIDRs, чтобы сохранить реальные маршруты
-		var all []string
-		for _, s := range loadRoutes() {
-			if d := loadCIDRCache(s); d != "" {
-				all = append(all, d)
-			}
-		}
-		if userCIDRs := loadActiveUserCIDRs(); userCIDRs != "" {
-			all = append(all, userCIDRs)
-		}
-		routes := strings.Join(all, " ")
-		if routes != "" {
-			os.WriteFile(origPath, []byte(routes), 0644)
-		}
-	}
-}
 
-func reloadWithAllowedIPs(allowedIPs string) string {
-	iface := findActiveInterface()
-	if iface == "" {
-		return "[ERROR] no active interface"
-	}
-	cfg := getCurrentConfig()
-	if cfg == nil {
-		return "[ERROR] no current config"
-	}
 
-	isFullTunnel := allowedIPs == "0.0.0.0/0, ::/0"
-
-	// При включении FT сохраняем текущие сервисные CIDR (до смены AllowedIPs)
-	if isFullTunnel {
-		saveOrigServiceCIDRs()
-	}
-
-	// Меняем AllowedIPs и применяем через setconf
-	cfg.AllowedIPs = allowedIPs
-	kernConf := filepath.Join(configsDir, "._ft_setconf")
-	cfg.SaveKernelConfig(kernConf)
-	if cfg.IsWireGuard {
-		sudo(wgBin, "setconf", iface, kernConf)
-	} else {
-		sudo(awgBin, "setconf", iface, kernConf)
-	}
-	os.Remove(kernConf)
-
-	// На macOS wg setconf не обновляет маршруты в System Extension — добавляем/удаляем default вручную
-	// Сохраняем оригинальный gateway из default маршрута перед изменениями
+func reloadFTEnabled(iface string) string {
+	// Получаем оригинальный default Gateway (через en0)
 	origGW := ""
 	origIface := ""
 	if out, err := exec.Command("netstat", "-rn", "-f", "inet").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
-			if strings.HasPrefix(line, "default") {
+			if strings.Contains(line, "default") && strings.Contains(line, "en0") {
 				fields := strings.Fields(line)
 				if len(fields) >= 4 {
 					origGW = fields[1]
 					origIface = fields[len(fields)-1]
 				}
+				break
 			}
 		}
 	}
-	if isFullTunnel {
-		// Сначала добавляем exclude-маршрут до известных подсетей (YC 10.10.10.0/24 и локальная сеть)
-		if origGW != "" && origIface != "" {
-			// Сохраняем orig gateway в state (для disable FT)
-			os.WriteFile(filepath.Join(stateDir, "orig_default_gw"), []byte(origGW+" "+origIface), 0644)
-			// Добавляем маршрут до нашей подсети через оригинальный gateway (чтоб SSH не упал)
-			sudo("route", "-n", "add", "-net", "10.10.10.0", "-netmask", "255.255.255.0", origGW)
-		}
-		// Добавляем default через WG интерфейс
-		sudo("route", "-n", "add", "-net", "0.0.0.0", "-netmask", "0.0.0.0", "-interface", iface)
-		return fmt.Sprintf("[\u2713] %s All Traffic", iface)
+	if origGW == "" || origIface == "" {
+		origGW = "172.28.16.1"
+		origIface = "en0"
 	}
-	// При выключении FT — удаляем default и exclude-маршруты
-	sudo("route", "-n", "delete", "-net", "0.0.0.0", "-netmask", "0.0.0.0")
-	sudo("route", "-n", "delete", "-net", "10.10.10.0", "-netmask", "255.255.255.0")
-	os.Remove(filepath.Join(stateDir, "orig_default_gw"))
-	routes := loadAllCIDRs()
-	return fmt.Sprintf("[\u2713] %s " + tr("s.updated") + " (%d " + tr("s.nets") + ")", iface, countCIDRs(routes))
+
+	// Сохраняем для отключения FT
+	os.WriteFile(filepath.Join(stateDir, "orig_default_gw"), []byte(origGW+" "+origIface), 0644)
+
+	// Safety route для SSH (10.10.10.0/24 через оригинальный GW)
+	sudo("route", "-n", "add", "-net", "10.10.10.0", "-netmask", "255.255.255.0", origGW)
+
+	// Default route через WG интерфейс (высокий приоритет, весь трафик идёт через VPN)
+	sudo("route", "-n", "add", "-net", "0.0.0.0", "-netmask", "0.0.0.0", "-interface", iface)
+
+	return fmt.Sprintf("[\u2713] %s All Traffic", iface)
 }
 
-func restoreOriginalAllowedIPs() string {
-	origPath := filepath.Join(stateDir, "orig_allowed_ips")
-	data, err := os.ReadFile(origPath)
-	if err != nil {
-		return "[!] no saved original AllowedIPs"
-	}
-	orig := strings.TrimSpace(string(data))
-	os.Remove(origPath)
-	// orig — это сервисные CIDR (подсети), не конфиг AllowedIPs
-	// Формируем AllowedIPs строку: сервисные CIDR через запятую
-	fields := strings.Fields(orig)
-	origIPs := strings.Join(fields, ", ")
-	return reloadWithAllowedIPs(origIPs)
+func reloadFTDisabled(iface string) string {
+	// Удаляем default route через WG интерфейс
+	sudo("route", "-n", "delete", "-net", "0.0.0.0", "-netmask", "0.0.0.0")
+	// Удаляем safety route
+	sudo("route", "-n", "delete", "-net", "10.10.10.0", "-netmask", "255.255.255.0")
+	os.Remove(filepath.Join(stateDir, "orig_default_gw"))
+
+	routes := loadAllCIDRs()
+	return fmt.Sprintf("[\u2713] %s "+tr("s.updated")+" (%d "+tr("s.nets")+")", iface, countCIDRs(routes))
 }
 
 
@@ -1064,17 +1009,7 @@ func cmdRoutesForce() string {
 		return "[!] " + tr("s.up_first")
 	}
 	if isFullTunnel() {
-		return reloadWithAllowedIPs("0.0.0.0/0, ::/0")
-	}
-	// Если full tunnel выключен, но есть orig_allowed_ips — восстанавливаем через reloadWithAllowedIPs
-	origPath := filepath.Join(stateDir, "orig_allowed_ips")
-	if data, err := os.ReadFile(origPath); err == nil {
-		orig := strings.TrimSpace(string(data))
-		if orig != "" {
-			fields := strings.Fields(orig)
-			origIPs := strings.Join(fields, ", ")
-			return reloadWithAllowedIPs(origIPs)
-		}
+		return reloadFTEnabled(iface)
 	}
 	routes := loadAllCIDRs()
 	if routes == "" {
@@ -1802,7 +1737,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					respondJSON(w, map[string]string{"error": "invalid JSON"})
 					return
 				}
+				// Отключаем/включаем FT
+				prevFT := isFullTunnel()
 				setFullTunnel(body.Enabled)
+				// Если выключаем FT — сразу убираем default/safety маршруты
+				if prevFT && !body.Enabled {
+					if iface := findActiveInterface(); iface != "" {
+						go func() { time.Sleep(200 * time.Millisecond); reloadFTDisabled(iface) }()
+					}
+				}
 				respondJSON(w, map[string]string{"status": "ok"})
 				return
 			}

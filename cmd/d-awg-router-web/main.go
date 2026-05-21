@@ -841,48 +841,290 @@ func clearState() { os.Remove(statePath()) }
 
 
 
+// === Full Tunnel helpers ===
+
+// getIfaceSubnet возвращает CIDR подсети для интерфейса (напр. 172.28.16.0/20 для en0)
+func getIfaceSubnet(iface string) string {
+	out, err := exec.Command("ifconfig", iface).Output()
+	if err != nil {
+		return ""
+	}
+	re := regexp.MustCompile(`inet (\d+\.\d+\.\d+\.\d+) netmask 0x([0-9a-fA-F]+)`)
+	m := re.FindStringSubmatch(string(out))
+	if len(m) < 3 {
+		return ""
+	}
+	ip := net.ParseIP(m[1]).To4()
+	if ip == nil {
+		return ""
+	}
+	maskHex := m[2]
+	maskInt, _ := strconv.ParseUint(maskHex, 16, 32)
+	mask := net.CIDRMask(bitsOnes(uint32(maskInt)), 32)
+	ones, _ := mask.Size()
+	network := ip.Mask(mask)
+	return fmt.Sprintf("%s/%d", network.String(), ones)
+}
+
+func bitsOnes(v uint32) int {
+	n := 0
+	for v != 0 {
+		n += int(v & 1)
+		v >>= 1
+	}
+	return n
+}
+
+// getOrigDefault возвращает (gateway, iface) первого non-WG default маршрута
+func getOrigDefault() (string, string) {
+	out, err := exec.Command("netstat", "-rn", "-f", "inet").Output()
+	if err != nil {
+		return "", ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.HasPrefix(line, "default") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		gwIface := fields[len(fields)-1]
+		if strings.HasPrefix(gwIface, "utun") || strings.HasPrefix(gwIface, "awdl") || strings.HasPrefix(gwIface, "llw") {
+			continue
+		}
+		return fields[1], gwIface
+	}
+	return "", ""
+}
+
+// getSSHClientSubnet возвращает подсеть SSH клиента из $SSH_CLIENT
+func getSSHClientSubnet() string {
+	client := os.Getenv("SSH_CLIENT")
+	if client == "" {
+		// Fallback: берём первый адрес из netstat для интерфейса без default
+		return ""
+	}
+	parts := strings.Fields(client)
+	if len(parts) < 1 {
+		return ""
+	}
+	ip := net.ParseIP(parts[0]).To4()
+	if ip == nil {
+		return ""
+	}
+	// Используем /24 подсеть от SSH клиента
+	network := ip.Mask(net.CIDRMask(24, 32))
+	return fmt.Sprintf("%s/24", network.String())
+}
+
+func ftExcludeRoutesPath() string { return filepath.Join(stateDir, "ft_exclude_routes") }
+
+func loadFTExcludeRoutes() []string {
+	data, _ := os.ReadFile(ftExcludeRoutesPath())
+	if len(data) == 0 {
+		return nil
+	}
+	return strings.Fields(string(data))
+}
+
+func saveFTExcludeRoutes(routes []string) {
+	os.WriteFile(ftExcludeRoutesPath(), []byte(strings.Join(routes, " \n")), 0644)
+}
+
+func clearFTExcludeRoutes() { os.Remove(ftExcludeRoutesPath()) }
+
+// reloadFTEnabled включает Full Tunnel: default через WG + exclude-маршруты + DNS
 func reloadFTEnabled(iface string) string {
-	// Получаем оригинальный default Gateway (через en0)
-	origGW := ""
-	origIface := ""
-	if out, err := exec.Command("netstat", "-rn", "-f", "inet").Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, "default") && strings.Contains(line, "en0") {
-				fields := strings.Fields(line)
-				if len(fields) >= 4 {
-					origGW = fields[1]
-					origIface = fields[len(fields)-1]
-				}
+	origGW, origIface := getOrigDefault()
+	if origGW == "" || origIface == "" {
+		return "[ERROR] no non-VPN default gateway found"
+	}
+
+	// Сохраняем оригинальный gateway
+	os.WriteFile(filepath.Join(stateDir, "orig_default_gw"), []byte(origGW+" "+origIface), 0644)
+
+	// Собираем exclude-маршруты (должны остаться через en0/local GW)
+	var excludeCIDRs []string
+
+	// 1. Локальная сеть оригинального интерфейса
+	if subnet := getIfaceSubnet(origIface); subnet != "" {
+		excludeCIDRs = append(excludeCIDRs, subnet)
+	}
+
+	// 2. SSH клиентская подсеть (если видна)
+	if sshNet := getSSHClientSubnet(); sshNet != "" {
+		// Не добавляем если уже покрывается локальной подсетью
+		covered := false
+		for _, c := range excludeCIDRs {
+			if sshNet == c {
+				covered = true
 				break
 			}
 		}
+		if !covered {
+			excludeCIDRs = append(excludeCIDRs, sshNet)
+		}
 	}
-	if origGW == "" || origIface == "" {
-		origGW = "172.28.16.1"
-		origIface = "en0"
+
+	// 3. link-local всегда
+	excludeCIDRs = append(excludeCIDRs, "169.254.0.0/16")
+
+	// Удаляем дубликаты
+	seen := make(map[string]bool)
+	var unique []string
+	for _, c := range excludeCIDRs {
+		if !seen[c] {
+			seen[c] = true
+			unique = append(unique, c)
+		}
+	}
+	excludeCIDRs = unique
+
+	// Добавляем exclude-маршруты через оригинальный GW
+	for _, cidr := range excludeCIDRs {
+		_, ipnet, _ := net.ParseCIDR(cidr)
+		if ipnet != nil {
+			first := ipnet.IP.To4().String()
+			mask := net.IP(ipnet.Mask).To4().String()
+			sudo("route", "-n", "add", "-net", first, "-netmask", mask, origGW)
+		}
 	}
 
-	// Сохраняем для отключения FT
-	os.WriteFile(filepath.Join(stateDir, "orig_default_gw"), []byte(origGW+" "+origIface), 0644)
+	// Сохраняем exclude-маршруты для отключения
+	saveFTExcludeRoutes(excludeCIDRs)
 
-	// Safety route для SSH (10.10.10.0/24 через оригинальный GW)
-	sudo("route", "-n", "add", "-net", "10.10.10.0", "-netmask", "255.255.255.0", origGW)
-
-	// Default route через WG интерфейс (высокий приоритет, весь трафик идёт через VPN)
+	// Default route через WG интерфейс
 	sudo("route", "-n", "add", "-net", "0.0.0.0", "-netmask", "0.0.0.0", "-interface", iface)
 
-	return fmt.Sprintf("[\u2713] %s All Traffic", iface)
+	// DNS через WG (1.1.1.1, 8.8.4.4)
+	saveOrigDNS()
+	if origIface == "en0" || origIface == "en1" {
+		// Определяем имя сервиса для Wi-Fi
+		svcName := getWiFiServiceName()
+		if svcName != "" {
+			sudo("networksetup", "-setdnsservers", svcName, "1.1.1.1", "8.8.4.4")
+		}
+	}
+
+	return fmt.Sprintf("[\u2713] %s All Traffic (%d exclude routes)", iface, len(excludeCIDRs))
 }
 
+// reloadFTDisabled отключает Full Tunnel: удаляет default, exclude, DNS
 func reloadFTDisabled(iface string) string {
-	// Удаляем default route через WG интерфейс
-	sudo("route", "-n", "delete", "-net", "0.0.0.0", "-netmask", "0.0.0.0")
-	// Удаляем safety route
-	sudo("route", "-n", "delete", "-net", "10.10.10.0", "-netmask", "255.255.255.0")
+	var errors []string
+
+	// 1. Удаляем default route через WG
+	if _, err := sudo("route", "-n", "delete", "-net", "0.0.0.0", "-netmask", "0.0.0.0"); err != nil {
+		errors = append(errors, "delete default: "+err.Error())
+	}
+
+	// 2. Удаляем exclude-маршруты
+	for _, cidr := range loadFTExcludeRoutes() {
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		first := ipnet.IP.To4().String()
+		mask := net.IP(ipnet.Mask).To4().String()
+		sudo("route", "-n", "delete", "-net", first, "-netmask", mask)
+	}
+
+	// 3. Восстанавливаем DNS
+	restoreOrigDNS()
+
+	// 4. Чистим state
 	os.Remove(filepath.Join(stateDir, "orig_default_gw"))
+	clearFTExcludeRoutes()
+
+	// 5. Если были ошибки с удалением default — перезагружаем интерфейс
+	if len(errors) > 0 {
+		// Fallback: cmdDown + cmdUp перезапустит интерфейс с сервисными CIDR
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			// Проверяем, не остался ли default через WG
+			if out, _ := exec.Command("netstat", "-rn", "-f", "inet").Output(); len(out) > 0 {
+				for _, line := range strings.Split(string(out), "\n") {
+					if strings.Contains(line, "default") && strings.Contains(line, iface) {
+						// Default всё ещё через WG — перезагружаем интерфейс
+						cmdDown()
+						time.Sleep(2 * time.Second)
+						cmdUp()
+						break
+					}
+				}
+			}
+		}()
+		return fmt.Sprintf("[!] %s FT disable (fallback restart scheduled, errors: %s)", iface, strings.Join(errors, "; "))
+	}
 
 	routes := loadAllCIDRs()
 	return fmt.Sprintf("[\u2713] %s "+tr("s.updated")+" (%d "+tr("s.nets")+")", iface, countCIDRs(routes))
+}
+
+// === DNS ===
+
+func origDNSPath() string { return filepath.Join(stateDir, "orig_dns") }
+
+func getWiFiServiceName() string {
+	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		l := strings.TrimSpace(line)
+		if strings.Contains(l, "Wi-Fi") || strings.Contains(l, "WiFi") || strings.Contains(l, "AirPort") {
+			return l
+		}
+	}
+	// Fallback: первый сервис с en0
+	out2, _ := exec.Command("networksetup", "-listnetworkserviceorder").Output()
+	re := regexp.MustCompile(`\(\d+\)\s+(.+)$`)
+	for _, line := range strings.Split(string(out2), "\n") {
+		if strings.Contains(line, "en0") {
+			if m := re.FindStringSubmatch(strings.TrimSpace(line)); len(m) >= 2 {
+				return strings.TrimSpace(m[1])
+			}
+		}
+	}
+	return ""
+}
+
+func saveOrigDNS() {
+	// Сохраняем текущие DNS серверы Wi-Fi
+	svcName := getWiFiServiceName()
+	if svcName == "" {
+		return
+	}
+	out, err := exec.Command("networksetup", "-getdnsservers", svcName).Output()
+	if err != nil {
+		return
+	}
+	dns := strings.TrimSpace(string(out))
+	if dns != "" && !strings.Contains(dns, "There aren't any") {
+		os.WriteFile(origDNSPath(), []byte(dns), 0644)
+	} else {
+		// Empty (DHCP) — записываем маркер
+		os.WriteFile(origDNSPath(), []byte("__EMPTY__"), 0644)
+	}
+}
+
+func restoreOrigDNS() {
+	svcName := getWiFiServiceName()
+	if svcName == "" {
+		return
+	}
+	data, _ := os.ReadFile(origDNSPath())
+	dns := strings.TrimSpace(string(data))
+	os.Remove(origDNSPath())
+	if dns == "__EMPTY__" || dns == "" {
+		// Вернуть на DHCP
+		sudo("networksetup", "-setdnsservers", svcName, "Empty")
+	} else {
+		servers := strings.Split(dns, "\n")
+		args := append([]string{"networksetup", "-setdnsservers", svcName}, servers...)
+		sudo(args...)
+	}
 }
 
 

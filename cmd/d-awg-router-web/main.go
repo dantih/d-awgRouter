@@ -2614,11 +2614,37 @@ func iconHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// ensureSudoers создаёт /etc/sudoers.d/d-awg-router при первом запуске
+func ensureSudoers() {
+	sudoersFile := "/etc/sudoers.d/d-awg-router"
+	// Проверяем, существует ли уже
+	if _, err := os.Stat(sudoersFile); err == nil {
+		return
+	}
+	// Определяем текущего пользователя
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "daniiltikhomirov"
+	}
+	content := fmt.Sprintf(`%s ALL=(ALL) NOPASSWD: /sbin/route, /usr/sbin/networksetup, /usr/sbin/scutil, /usr/bin/scutil, /usr/bin/uuidgen
+`, user)
+	// Пытаемся создать через sudo с tee (может спросить пароль один раз)
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo '%s' | sudo tee %s > /dev/null && sudo chmod 440 %s", content, sudoersFile, sudoersFile))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("[!] could not create sudoers file: %v\n", err)
+		return
+	}
+	fmt.Printf("[const] Created %s\n", sudoersFile)
+}
+
 func main() {
 	initPage()
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "start":
+			ensureSudoers()
 			launchctl("load")
 			fmt.Printf("d-awg-router %s started on http://%s:%s\n", appVersion, host, port)
 		case "stop":

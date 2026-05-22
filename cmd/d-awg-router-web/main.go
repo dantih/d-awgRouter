@@ -1216,11 +1216,7 @@ set State:/Network/Global/IPv4
 	// Выполняем scutil скрипт
 	debug("reloadFTEnabled: running scutil script (len=%d)", len(script))
 	cmd := exec.Command("sudo", "scutil")
-	stdin, _ := cmd.StdinPipe()
-	go func() {
-		defer stdin.Close()
-		io.WriteString(stdin, script)
-	}()
+	cmd.Stdin = strings.NewReader(script)
 	out, scutilErr := cmd.Output()
 	debug("reloadFTEnabled: scutil output=%q err=%v", string(out), scutilErr)
 	if scutilErr != nil {

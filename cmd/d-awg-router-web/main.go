@@ -1213,14 +1213,14 @@ set State:/Network/Global/IPv4
 	saveFTExcludeRoutes(excludeCIDRs)
 	saveFTServiceUUID(svcUUID)
 
-	// Выполняем scutil скрипт
+	// Выполняем scutil скрипт (через pipe — пишем скрипт в stdin)
 	debug("reloadFTEnabled: running scutil script (len=%d)", len(script))
 	for _, line := range strings.Split(script, "\n") {
 		debug("scutil> %s", line)
 	}
 	cmd := exec.Command("sudo", "scutil")
 	cmd.Stdin = strings.NewReader(script)
-	out, scutilErr := cmd.Output()
+	out, scutilErr := cmd.CombinedOutput()
 	debug("reloadFTEnabled: scutil output=%q err=%v", string(out), scutilErr)
 	if scutilErr != nil {
 		debug("reloadFTEnabled: scutil FAILED: %s", string(out))

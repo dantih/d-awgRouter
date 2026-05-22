@@ -1091,6 +1091,20 @@ func loadFTServiceUUID() string {
 }
 
 func clearFTServiceUUID() { os.Remove(ftServiceUUIDPath()) }
+// cleanupOldScutilServices удаляет stale service UUIDs из System Configuration
+func cleanupOldScutilServices() {
+	svcUUID := loadFTServiceUUID()
+	if svcUUID == "" {
+		return
+	}
+	// Пробуем удалить старый UUID если он есть в scutil
+	script := fmt.Sprintf(`d.init
+remove State:/Network/Service/%s
+remove State:/Network/Service/%s/DNS`, svcUUID, svcUUID)
+	exec.Command("/bin/sh", "-c", "echo '"+script+"' | sudo scutil").Run()
+	debug("cleanupOldScutilServices: removed stale UUID %s", svcUUID)
+}
+
 
 // getWGInterfaceIP возвращает IP адрес WG интерфейса
 func getWGInterfaceIP(iface string) string {
@@ -1120,10 +1134,6 @@ func reloadFTEnabled(iface string) string {
 
 	// Генерируем scutil скрипт для регистрации сервиса
 	script := fmt.Sprintf(`d.init
-# Отмечаем как Primary с наивысшим приоритетом
-set State:/Network/Service/%s
-
-d.init
 d.add InterfaceName %s
 d.add ConfirmedServiceID %s
 d.add ServerAddresses * 1.1.1.1
@@ -1213,22 +1223,37 @@ set State:/Network/Global/IPv4
 	saveFTExcludeRoutes(excludeCIDRs)
 	saveFTServiceUUID(svcUUID)
 
-	// Выполняем scutil скрипт (через pipe — пишем скрипт в stdin)
+	// Выполняем scutil скрипт через временный файл (прямой stdin не применяет Global/IPv4)
 	debug("reloadFTEnabled: running scutil script (len=%d)", len(script))
 	for _, line := range strings.Split(script, "\n") {
 		debug("scutil> %s", line)
 	}
-	cmd := exec.Command("sudo", "scutil")
-	cmd.Stdin = strings.NewReader(script)
-	out, scutilErr := cmd.CombinedOutput()
+	scriptFile := filepath.Join(os.TempDir(), "d-awg-ft.scutil")
+	os.WriteFile(scriptFile, []byte(script), 0644)
+	defer os.Remove(scriptFile)
+	out, scutilErr := exec.Command("sudo", "scutil").CombinedOutput()
+	// scutil сам читает stdin — передаём через shell redirect
+	out, scutilErr = exec.Command("/bin/sh", "-c", "sudo scutil < "+scriptFile).CombinedOutput()
 	debug("reloadFTEnabled: scutil output=%q err=%v", string(out), scutilErr)
 	if scutilErr != nil {
 		debug("reloadFTEnabled: scutil FAILED: %s", string(out))
 		return fmt.Sprintf("[!] scutil error: %s", string(out))
 	}
+	// Проверяем default route после scutil
+	debug("reloadFTEnabled: checking default route after scutil")
+	routeOut, _ := exec.Command("netstat", "-rn", "-f", "inet").Output()
+	for _, line := range strings.Split(string(routeOut), "\n") {
+		if strings.HasPrefix(line, "default") {
+			debug("reloadFTEnabled: default route: %s", line)
+			break
+		}
+	}
 
 	_ = script
 	_ = wgIP
+
+	// Очищаем старые stale service UUIDs из scutil (если остались)
+	cleanupOldScutilServices()
 
 	// DNS через scutil (уже сделано в скрипте выше)
 	saveOrigDNS()

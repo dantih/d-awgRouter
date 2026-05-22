@@ -35,6 +35,8 @@ var (
 	langName   string // текущий язык "en" или "ru"
 	lang       LangMap
 	appVersion = "0.0.0-dev" // overridden by -ldflags or version.txt
+	debugMode  = false
+	debugLog   []string // буфер лога для показа в UI
 
 	repoCIDRAPI = "https://api.github.com/repos/RockBlack-VPN/ip-address/contents/Global"
 	repoRawFmt  = "https://raw.githubusercontent.com/RockBlack-VPN/ip-address/main/Global/%s/%s"
@@ -611,8 +613,10 @@ func findWireGuardGo() string {
 	return "wireguard-go"
 }
 
+// findActiveInterface ищет живой utun-интерфейс, который принадлежит нашему сервису.
+// Сначала проверяет state/current (быстрый путь), затем сканирует utun7-15.
 func findActiveInterface() string {
-	// Возвращаем только интерфейс, который принадлежит нашему сервису
+	// Возвращаем только интерфейс, который принадлежит нашему сервису (по state/current)
 	if data, err := os.ReadFile(statePath()); err == nil {
 		var st State
 		if json.Unmarshal(data, &st) == nil && st.Interface != "" {
@@ -624,6 +628,8 @@ func findActiveInterface() string {
 	return ""
 }
 
+
+
 func showInterface(iface string) (string, error) {
 	if out, err := sudo(awgBin, "show", iface); err == nil && len(out) > 0 {
 		return out, nil
@@ -634,6 +640,68 @@ func showInterface(iface string) (string, error) {
 func isInterfaceAlive(iface string) bool {
 	out, _ := exec.Command("ifconfig", iface).Output()
 	return len(out) > 0
+}
+
+// findFreeUtun ищет свободный utun интерфейс (начиная с minDev)
+func findFreeUtun(minDev int) string {
+	for i := minDev; i <= 15; i++ {
+		dev := fmt.Sprintf("utun%d", i)
+		if !isInterfaceAlive(dev) {
+			return dev
+		}
+	}
+	return ""
+}
+
+func killOurWgProcess() {
+	wgPidPath := filepath.Join(stateDir, "wg_pid")
+	data, err := os.ReadFile(wgPidPath)
+	if err != nil {
+		// No PID saved — nothing to kill
+		return
+	}
+	pid := strings.TrimSpace(string(data))
+	if pid == "" {
+		return
+	}
+	// Проверяем жив ли процесс с этим PID
+	alive, _ := exec.Command("ps", "-p", pid, "-o", "pid=").Output()
+	if len(strings.TrimSpace(string(alive))) == 0 {
+		// Process already dead, just clean up
+		debug("killOurWgProcess: PID %s already dead, cleaning up", pid)
+		os.Remove(wgPidPath)
+		return
+	}
+	debug("killOurWgProcess: killing our PID %s", pid)
+	sudo("kill", pid)
+	time.Sleep(500 * time.Millisecond)
+	// SIGKILL if still alive
+	alive2, _ := exec.Command("ps", "-p", pid, "-o", "pid=").Output()
+	if len(strings.TrimSpace(string(alive2))) > 0 {
+		debug("killOurWgProcess: SIGKILL PID %s", pid)
+		sudo("kill", "-9", pid)
+	}
+	os.Remove(wgPidPath)
+}
+// === Debug ===
+
+func debug(format string, args ...interface{}) {
+	if !debugMode {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	ts := time.Now().Format("15:04:05.000")
+	line := fmt.Sprintf("[%s] %s", ts, msg)
+	debugLog = append(debugLog, line)
+	// Сохраняем последние 100 строк
+	if len(debugLog) > 100 {
+		debugLog = debugLog[len(debugLog)-100:]
+	}
+	fmt.Println(line)
+}
+
+func getDebugLog() string {
+	return strings.Join(debugLog, "\n")
 }
 
 // === Sudo ===
@@ -686,21 +754,10 @@ func wireguardUp(cfg *AWGConfig) string {
 	cfgName := getActiveConfigName()
 	ip := strings.Split(cfg.Address, "/")[0]
 
-	// Ищем свободный utun (6 занят штатным WG)
-	var freeDev string
-	for i := 7; i <= 15; i++ {
-		dev := fmt.Sprintf("utun%d", i)
-		info, _ := exec.Command("ifconfig", dev).Output()
-		s := string(info)
-		if s == "" {
-			freeDev = dev
-			break
-		}
-	}
-	if freeDev == "" {
+	iface := findFreeUtun(7)
+	if iface == "" {
 		return "[ERROR] Нет свободных utun (7-15)"
 	}
-	iface := freeDev
 
 	wgGo := findWireGuardGo()
 
@@ -731,6 +788,12 @@ func wireguardUp(cfg *AWGConfig) string {
 	}
 
 	saveState(iface, ip)
+	// Full Tunnel — регистрируем в System Configuration если включён
+	if isFullTunnel() {
+		debug("wireguardUp: full tunnel enabled, calling reloadFTEnabled")
+		ftResult := reloadFTEnabled(iface)
+		debug("wireguardUp: reloadFTEnabled result: %s", ftResult)
+	}
 	so, _ := showInterface(iface)
 	out := fmt.Sprintf("[✓] [%s] "+tr("s.wg_up", iface)+"\n\n%s", cfgName, so)
 	if routes != "" {
@@ -743,31 +806,62 @@ func amneziawgUp(cfg *AWGConfig) string {
 	cfgName := getActiveConfigName()
 	ip := strings.Split(cfg.Address, "/")[0]
 
-	// Свободный utun (не utun6)
-	var freeDev string
-	for i := 7; i <= 15; i++ {
-		dev := fmt.Sprintf("utun%d", i)
-		info, _ := exec.Command("ifconfig", dev).Output()
-		s := string(info)
-		if s == "" {
-			freeDev = dev
-			break
-		}
-	}
-	if freeDev == "" {
+	iface := findFreeUtun(7)
+	if iface == "" {
 		return "[ERROR] Нет свободных utun (7-15)"
 	}
-	iface := freeDev
 
-	// Запускаем amneziawg-go
+
+	debug("amneziawgUp: cfg=%s ip=%s", cfgName, ip)
+	debug("amneziawgUp: chosen iface=%s", iface)
+
+	// Запускаем amneziawg-go с захватом stderr
 	startCmd := exec.Command("sudo", "-n", awgGo, iface)
+	var stderrBuf bytes.Buffer
+	startCmd.Stderr = &stderrBuf
 	startCmd.Stdout = nil
-	startCmd.Stderr = nil
-	startCmd.Start()
+	if err := startCmd.Start(); err != nil {
+		errMsg := fmt.Sprintf("amneziawg-go start error: %v", err)
+		debug("ERROR: %s", errMsg)
+		return "[ERROR] " + errMsg
+	}
+	debug("amneziawg-go started, PID=%d", startCmd.Process.Pid)
 	time.Sleep(3 * time.Second)
 
+	if stderrBuf.Len() > 0 {
+		debug("amneziawg-go stderr: %s", strings.TrimSpace(stderrBuf.String()))
+	}
+
+	// Если интерфейс не поднялся — destroy и retry
 	if !isInterfaceAlive(iface) {
-		return "[ERROR] amneziawg-go не запустился на " + iface
+		alive := isInterfaceAlive(iface)
+		debug("amneziawgUp: after 3s iface=%s alive=%v stderr=%s", iface, alive, strings.TrimSpace(stderrBuf.String()))
+		sudo("/sbin/ifconfig", iface, "destroy")
+		time.Sleep(500 * time.Millisecond)
+		debug("amneziawgUp: retry after destroy")
+		stderrBuf.Reset()
+		startCmd = exec.Command("sudo", "-n", awgGo, iface)
+		startCmd.Stderr = &stderrBuf
+		startCmd.Start()
+		debug("retry PID=%d", startCmd.Process.Pid)
+		time.Sleep(3 * time.Second)
+
+		if stderrBuf.Len() > 0 {
+			debug("retry stderr: %s", strings.TrimSpace(stderrBuf.String()))
+		}
+
+		if !isInterfaceAlive(iface) {
+			debug("ERROR: amneziawg-go not alive after retry")
+			return "[ERROR] amneziawg-go не запустился на " + iface + " (stderr: " + strings.TrimSpace(stderrBuf.String()) + ")"
+		}
+	}
+
+	debug("amneziawgUp: interface %s is alive", iface)
+
+	// Сохраняем PID процесса для корректного убийства при DOWN
+	wgPidPath := filepath.Join(stateDir, "wg_pid")
+	if startCmd.Process != nil {
+		os.WriteFile(wgPidPath, []byte(fmt.Sprintf("%d", startCmd.Process.Pid)), 0644)
 	}
 
 	// Назначаем IP
@@ -786,6 +880,12 @@ func amneziawgUp(cfg *AWGConfig) string {
 	}
 
 	saveState(iface, ip)
+	// Full Tunnel — регистрируем в System Configuration если включён
+	if isFullTunnel() {
+		debug("amneziawgUp: full tunnel enabled, calling reloadFTEnabled")
+		ftResult := reloadFTEnabled(iface)
+		debug("amneziawgUp: reloadFTEnabled result: %s", ftResult)
+	}
 	so, _ := showInterface(iface)
 	out := fmt.Sprintf("[✓] [%s] "+tr("s.awg_up", iface)+"\n\n%s", cfgName, so)
 	if routes != "" {
@@ -800,33 +900,35 @@ func cmdUp() string {
 		return "[ERROR] " + tr("s.config_needed")
 	}
 
-	// Если уже активен наш интерфейс — просто шоу
-	if iface := findActiveInterface(); iface != "" && isInterfaceAlive(iface) {
-		// Перепроверяем, что это наш интерфейс: проверим IP
-		if info, _ := exec.Command("ifconfig", iface).Output(); len(info) > 0 {
-			ip := strings.Split(cfg.Address, "/")[0]
-			if !strings.Contains(string(info), "inet "+ip) {
-				// IP не совпадает — это не наш интерфейс, чистим state
-				clearState()
-			} else {
-				out := fmt.Sprintf("[✓] %s %s\n", tr("s.already_up"), iface)
-				so, _ := showInterface(iface)
-				out += so
-				return out
-			}
+	debug("cmdUp: config=%s ip=%s", getActiveConfigName(), cfg.Address)
+
+	// If we already have an active interface with matching IP — just show
+	if iface := findActiveInterface(); iface != "" {
+		info, _ := exec.Command("ifconfig", iface).Output()
+		ip := strings.Split(cfg.Address, "/")[0]
+		if strings.Contains(string(info), "inet "+ip) {
+			debug("cmdUp: already up on %s", iface)
+			out := fmt.Sprintf("[✓] %s %s\n", tr("s.already_up"), iface)
+			so, _ := showInterface(iface)
+			out += so
+			return out
 		}
+		// IP mismatch — state is stale, clear it
+		debug("cmdUp: state interface %s has wrong IP, clearing state", iface)
+		clearState()
 	}
 
-	// Убиваем что могло остаться
-	cmdDown()
+	// Kill our previously saved process if still alive
+	killOurWgProcess()
 	time.Sleep(1 * time.Second)
+
+	debug("cmdUp: starting %s", map[bool]string{true: "WireGuard", false: "AWG"}[cfg.IsWireGuard])
 
 	if cfg.IsWireGuard {
 		return wireguardUp(cfg)
 	}
 	return amneziawgUp(cfg)
 }
-
 type State struct {
 	Interface string `json:"interface"`
 	IP        string `json:"ip"`
@@ -1003,14 +1105,18 @@ func getWGInterfaceIP(iface string) string {
 
 // reloadFTEnabled включает Full Tunnel: регистрирует сервис в System Configuration (как utun5/utun6)
 func reloadFTEnabled(iface string) string {
+	debug("reloadFTEnabled: iface=%s", iface)
+
 	// Получаем IP интерфейса
 	wgIP := getWGInterfaceIP(iface)
+	debug("reloadFTEnabled: wgIP=%s", wgIP)
 	if wgIP == "" {
 		return "[ERROR] cannot get IP for " + iface
 	}
 
 	// Генерируем UUID для сервиса
 	svcUUID := generateUUID()
+	debug("reloadFTEnabled: svcUUID=%s", svcUUID)
 
 	// Генерируем scutil скрипт для регистрации сервиса
 	script := fmt.Sprintf(`d.init
@@ -1038,6 +1144,7 @@ set State:/Network/Global/IPv4
 
 	// Добавляем exclude-маршруты (WG endpoint, SSH, локальная сеть)
 	origGW, origIface := getOrigDefault()
+	debug("reloadFTEnabled: origGW=%s origIface=%s", origGW, origIface)
 	if origGW == "" || origIface == "" {
 		return "[ERROR] no non-VPN default gateway found"
 	}
@@ -1107,13 +1214,17 @@ set State:/Network/Global/IPv4
 	saveFTServiceUUID(svcUUID)
 
 	// Выполняем scutil скрипт
+	debug("reloadFTEnabled: running scutil script (len=%d)", len(script))
 	cmd := exec.Command("sudo", "scutil")
 	stdin, _ := cmd.StdinPipe()
 	go func() {
 		defer stdin.Close()
 		io.WriteString(stdin, script)
 	}()
-	if out, err := cmd.Output(); err != nil {
+	out, scutilErr := cmd.Output()
+	debug("reloadFTEnabled: scutil output=%q err=%v", string(out), scutilErr)
+	if scutilErr != nil {
+		debug("reloadFTEnabled: scutil FAILED: %s", string(out))
 		return fmt.Sprintf("[!] scutil error: %s", string(out))
 	}
 
@@ -1128,7 +1239,9 @@ set State:/Network/Global/IPv4
 
 // reloadFTDisabled отключает Full Tunnel: удаляет service из System Configuration
 func reloadFTDisabled(iface string) string {
+	debug("reloadFTDisabled: iface=%s", iface)
 	svcUUID := loadFTServiceUUID()
+	debug("reloadFTDisabled: svcUUID=%s", svcUUID)
 	if svcUUID != "" {
 		script := fmt.Sprintf(`d.init
 remove State:/Network/Service/%s
@@ -1238,25 +1351,26 @@ func restoreOrigDNS() {
 
 func cmdDown() string {
 	iface := findActiveInterface()
-	if iface == "" {
-		return "[!] " + tr("s.none_active")
-	}
 
 	removeAllRoutes()
-
-	// Убиваем процесс (wireguard-go или amneziawg-go)
-	for _, name := range []string{"wireguard-go", "amneziawg-go"} {
-		pids, _ := exec.Command("pgrep", "-f", name+".*"+iface).Output()
-		if len(pids) > 0 {
-			sudo("kill", "-TERM", strings.TrimSpace(string(pids)))
-			time.Sleep(1 * time.Second)
-			sudo("kill", "-9", strings.TrimSpace(string(pids)))
-		}
-	}
-	sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))
-	sudo("rm", "-f", fmt.Sprintf("/var/run/wireguard/%s.sock", iface))
 	clearState()
-	return fmt.Sprintf("[✓] [%s] %s %s", getActiveConfigName(), iface, tr("s.down_iface"))
+
+	if iface != "" {
+		debug("cmdDown: destroying %s", iface)
+		sudo("/sbin/ifconfig", iface, "destroy")
+		time.Sleep(300 * time.Millisecond)
+		// Clean sock files
+		sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))
+		sudo("rm", "-f", fmt.Sprintf("/var/run/wireguard/%s.sock", iface))
+	}
+
+	// Kill our saved process only
+	killOurWgProcess()
+
+	if iface != "" {
+		return fmt.Sprintf("[✓] [%s] %s %s", getActiveConfigName(), iface, tr("s.down_iface"))
+	}
+	return "[✓] " + tr("s.none_active")
 }
 
 func cmdRestart() string {
@@ -2090,10 +2204,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				// Отключаем/включаем FT
 				prevFT := isFullTunnel()
 				setFullTunnel(body.Enabled)
-				// Если выключаем FT — сразу убираем default/safety маршруты
-				if prevFT && !body.Enabled {
-					if iface := findActiveInterface(); iface != "" {
-						go func() { time.Sleep(200 * time.Millisecond); reloadFTDisabled(iface) }()
+				if iface := findActiveInterface(); iface != "" {
+					if !prevFT && body.Enabled {
+						// Включаем FT — регистрируем сервис в System Configuration
+						debug("api: enabling full tunnel on %s", iface)
+						go func() { time.Sleep(200 * time.Millisecond); debug("api: calling reloadFTEnabled: %s", reloadFTEnabled(iface)) }()
+					} else if prevFT && !body.Enabled {
+						// Выключаем FT — убираем сервис
+						debug("api: disabling full tunnel on %s", iface)
+						go func() { time.Sleep(200 * time.Millisecond); debug("api: calling reloadFTDisabled: %s", reloadFTDisabled(iface)) }()
 					}
 				}
 				respondJSON(w, map[string]string{"status": "ok"})
@@ -2593,6 +2712,12 @@ func handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonError(w, "route not found")
 
+	case "/api/debug":
+		respondJSON(w, map[string]interface{}{
+			"enabled": debugMode,
+			"log":     getDebugLog(),
+		})
+
 	default:
 		jsonError(w, "unknown API endpoint")
 	}
@@ -2641,6 +2766,23 @@ func ensureSudoers() {
 
 func main() {
 	initPage()
+
+	// Debug mode: --debug flag overrides file check
+	for _, a := range os.Args {
+		if a == "--debug" || a == "-debug" {
+			debugMode = true
+			break
+		}
+	}
+	if !debugMode {
+		if _, err := os.Stat(filepath.Join(stateDir, "debug")); err == nil {
+			debugMode = true
+		}
+	}
+	if debugMode {
+		fmt.Println("d-awg-router: DEBUG MODE enabled")
+	}
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "start":
@@ -2656,8 +2798,25 @@ func main() {
 			fmt.Printf("d-awg-router %s restarted on http://%s:%s\n", appVersion, host, port)
 		case "status":
 			statusService()
+		case "debug":
+			if len(os.Args) > 2 && os.Args[2] == "on" {
+				os.WriteFile(filepath.Join(stateDir, "debug"), []byte("1"), 0644)
+				fmt.Println("debug mode ON — restart service")
+			} else if len(os.Args) > 2 && os.Args[2] == "off" {
+				os.Remove(filepath.Join(stateDir, "debug"))
+				fmt.Println("debug mode OFF — restart service")
+			} else {
+				fmt.Println("Usage: d-awg-router-web debug [on|off]")
+			}
+		case "destroy":
+			if len(os.Args) > 2 {
+				sudo("/sbin/ifconfig", os.Args[2], "destroy")
+				fmt.Printf("destroyed %s\n", os.Args[2])
+			} else {
+				fmt.Println("Usage: d-awg-router-web destroy <iface>")
+			}
 		default:
-			fmt.Printf("Usage: %s [start|stop|restart|status]\n", os.Args[0])
+			fmt.Printf("Usage: %s [start|stop|restart|status|debug|destroy <iface>]\n", os.Args[0])
 		}
 		return
 	}

@@ -19,6 +19,7 @@ fi
 
 REPO="dantih/d-awgRouter"
 RELEASE_URL="https://github.com/$REPO/releases/latest/download/$NAME-darwin-arm64"
+GO_BIN="go"
 
 echo ""
 echo "=============================="
@@ -27,7 +28,7 @@ echo "=============================="
 echo ""
 
 # --- Step 0: check dependencies ---
-echo "[0/6] Проверяем зависимости..."
+echo "[0/7] Проверяем зависимости..."
 
 BREW_BIN="/opt/homebrew/bin/brew"
 NEED_BREW=""
@@ -63,6 +64,16 @@ check_dep "wg" "wireguard-tools" "/opt/homebrew/bin/wg /usr/local/bin/wg"
 check_dep "wireguard-go" "" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go"
 check_dep "awg" "" "/usr/local/bin/awg"
 check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
+
+# Go (для сборки) — если нет, установим через brew
+if ! command -v go &>/dev/null; then
+    echo "  ⚠ go не найден"
+    GO_BIN="/opt/homebrew/bin/go"
+    NEED_BREW="$NEED_BREW go"
+else
+    GO_BIN=$(command -v go)
+    echo "  ✓ go: $GO_BIN"
+fi
 
 # Install missing brew packages
 if [ -n "$NEED_BREW" ]; then
@@ -104,48 +115,55 @@ if [ -n "$NEED_BREW" ]; then
 fi
 
 # --- Step 1: cache sudo ---
-echo "[1/6] Кэшируем sudo (потребуется пароль)..."
+echo "[1/7] Кэшируем sudo (потребуется пароль)..."
 sudo -v
-# --- Step 2: download binary ---
-echo "[2/6] Скачиваем $NAME из GitHub Releases..."
-TMP_BIN=$(mktemp)
-echo -n "  ⏳ Загрузка... "
-HTTP_CODE=$(curl -fL --progress-bar -o "$TMP_BIN" "$RELEASE_URL" 2>&1 | tail -1) || true
-if [ -s "$TMP_BIN" ] && [ "$(stat -f%z "$TMP_BIN" 2>/dev/null || echo 0)" -gt 1000000 ]; then
-    chmod +x "$TMP_BIN"
-    SIZE=$(du -h "$TMP_BIN" | cut -f1)
-    echo "✓ $SIZE"
+# --- Step 2: clone source ---
+echo "[2/7] Клонируем исходники $REPO..."
+TMP_DIR=$(mktemp -d)
+trap "rm -rf $TMP_DIR" EXIT
+
+echo -n "  ⏳ git clone... "
+# shallow clone for speed
+if git clone --depth 1 "https://github.com/$REPO.git" "$TMP_DIR" 2>/dev/null; then
+    echo "✓"
+    cd "$TMP_DIR"
 else
-    echo "✗ Ошибка!"
-    echo "[✗] Не удалось скачать бинарник с $RELEASE_URL"
-    echo "    Проверь: https://github.com/$REPO/releases"
-    rm -f "$TMP_BIN"
+    echo "✗"
+    echo "[✗] Не удалось склонировать репозиторий."
     exit 1
 fi
 
-# --- Step 3: install binary + version ---
-echo "[3/6] Устанавливаем $NAME → $BIN_DEST"
-sudo cp "$TMP_BIN" "$BIN_DEST"
-sudo chmod 755 "$BIN_DEST"
-rm -f "$TMP_BIN"
-
-# Save version
-VER_URL="https://raw.githubusercontent.com/$REPO/main/version.txt"
-echo -n "  ⏳ Версия... "
-if curl -sfL -o "$CONFIG_DIR/version.txt" "$VER_URL"; then
-    echo "✓ $(cat $CONFIG_DIR/version.txt)"
+# --- Step 3: build from source ---
+echo "[3/7] Собираем $NAME из исходников..."
+echo -n "  ⏳ $GO_BIN build... "
+if $GO_BIN build -ldflags="-s -w" -o "/tmp/$NAME" "./cmd/$NAME/" 2>/tmp/dawg_build_err; then
+    SIZE=$(du -h "/tmp/$NAME" | cut -f1)
+    echo "✓ $SIZE"
 else
-    # Fallback: генерируем из тега релиза
-    if [[ "$RELEASE_URL" =~ /releases/download/v?([0-9.]+)/ ]]; then
-        echo "${BASH_REMATCH[1]}" > "$CONFIG_DIR/version.txt"
-        echo "✓ (fallback) ${BASH_REMATCH[1]}"
-    else
-        echo "— (не критично)"
-    fi
+    echo "✗"
+    echo "[✗] Ошибка сборки:"
+    cat /tmp/dawg_build_err
+    exit 1
 fi
 
-# --- Step 4: sudoers ---
-echo "[4/6] Настраиваем /etc/sudoers.d/d-awg-router"
+# Save version from repo
+VERSION=$(cat version.txt 2>/dev/null || echo "dev")
+echo -n "  ⏳ Версия... "
+echo "$VERSION" > "$CONFIG_DIR/version.txt"
+echo "✓ $VERSION"
+
+# --- Step 4: install binary ---
+echo "[4/7] Устанавливаем $NAME → $BIN_DEST"
+sudo cp "/tmp/$NAME" "$BIN_DEST"
+sudo chmod 755 "$BIN_DEST"
+rm -f "/tmp/$NAME"
+
+# Clean up Git repo (delete source)
+rm -rf "$TMP_DIR"
+trap - EXIT
+
+# --- Step 5: sudoers ---
+echo "[5/7] Настраиваем /etc/sudoers.d/d-awg-router"
 WG_BIN=$(which wg 2>/dev/null || echo "/opt/homebrew/bin/wg")
 WG_GO_BIN=$(which wireguard-go 2>/dev/null || echo "/opt/homebrew/bin/wireguard-go")
 SUDOERS_LINE="$USER ALL=(ALL) NOPASSWD: $BIN_DEST, /usr/local/bin/awg, /usr/local/bin/amneziawg-go, /sbin/route, /sbin/ifconfig, /bin/kill, /bin/rm, /bin/pgrep, $WG_BIN, $WG_GO_BIN"
@@ -153,8 +171,8 @@ echo "$SUDOERS_LINE" | sudo tee "$SUDOERS_FILE" > /dev/null
 sudo chmod 440 "$SUDOERS_FILE"
 echo "  ✓ Разрешены: awg, amneziawg-go, route, ifconfig, kill, rm, pgrep, wg, wireguard-go"
 
-# --- Step 5: directory structure + icon ---
-echo "[5/6] Создаём ~/.d-awg-router/{configs,cache,routes,state}"
+# --- Step 6: directory structure + icon ---
+echo "[6/7] Создаём ~/.d-awg-router/{configs,cache,routes,state}"
 mkdir -p "$CONFIG_DIR"/{configs,cache,routes,state}
 
 # Download icon from GitHub
@@ -178,8 +196,8 @@ if [ -f "$ICON_DST" ]; then
     fi
 fi
 
-# --- Step 6: launchd plist ---
-echo "[6/6] Устанавливаем launchd plist → $PLIST_DEST"
+# --- Step 7: launchd plist ---
+echo "[7/7] Устанавливаем launchd plist → $PLIST_DEST"
 
 cat > /tmp/com.d-awg-router.web.plist << PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -64,7 +64,7 @@ check_dep "wireguard-go" "" "/opt/homebrew/bin/wireguard-go /usr/local/bin/wireg
 check_dep "awg" "" "/usr/local/bin/awg"
 check_dep "amneziawg-go" "" "/usr/local/bin/amneziawg-go"
 
-# Install missing brew packages
+# Install missing brew packages (wg, wireguard-go)
 if [ -n "$NEED_BREW" ]; then
     echo ""
     echo "  Не хватает: $NEED_BREW"
@@ -87,8 +87,6 @@ if [ -n "$NEED_BREW" ]; then
                 echo -n "  → brew install $pkg... "
                 if brew install "$pkg"; then
                     echo "✓"
-                    # Re-check paths after install
-                    WG_CHECK=$(ls /opt/homebrew/bin/wg /opt/homebrew/bin/wireguard-go /usr/local/bin/wg 2>/dev/null || true)
                 else
                     echo "✗"
                 fi
@@ -101,6 +99,16 @@ if [ -n "$NEED_BREW" ]; then
         done
     fi
     echo ""
+fi
+
+# Install missing AmneziaWG binaries (awg, amneziawg-go)
+if ! [ -x "/usr/local/bin/awg" ]; then
+    echo "  → Скачиваю awg..."
+    sudo curl -fsSL -o /usr/local/bin/awg "https://github.com/amnezia-vpn/amneziawg-tools/raw/master/awg" && sudo chmod +x /usr/local/bin/awg && echo "    ✓ awg установлен" || echo "    ✗ awg: ошибка"
+fi
+if ! [ -x "/usr/local/bin/amneziawg-go" ]; then
+    echo "  → Скачиваю amneziawg-go..."
+    sudo curl -fsSL -o /usr/local/bin/amneziawg-go "https://github.com/amnezia-vpn/amneziawg-go/raw/master/amneziawg-go" && sudo chmod +x /usr/local/bin/amneziawg-go && echo "    ✓ amneziawg-go установлен" || echo "    ✗ amneziawg-go: ошибка"
 fi
 
 # --- Step 1: cache sudo ---

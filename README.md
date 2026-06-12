@@ -33,19 +33,33 @@ Routes (CIDR subnets) for various services (Telegram, YouTube, Netflix, etc.) ar
 
 ## Quick start
 
-### Install from release
+### One-line install
+
+```bash
+sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh | bash
+```
+
+The script will automatically:
+1. Check for dependencies (`wg`, `wireguard-go`, `awg`, `amneziawg-go`)
+2. Install Go (via Homebrew or download) if missing
+3. Build `amneziawg-go` from source
+4. Create `awg` symlink to `wg` (compatible CLI)
+5. Download and install the web service
+6. Set up sudoers, launchd plist, and config directory
+7. Start the service
+
+> **Note:** GitHub raw CDN may cache `main` branch. If you get an outdated script, use the tagged version instead:
+> ```bash
+> sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/v1/install.sh | bash
+> ```
+
+### Manual install
 
 ```bash
 curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
 chmod +x /tmp/d-awg-router-web
 mkdir -p ~/.d-awg-router
 mv /tmp/d-awg-router-web ~/.d-awg-router/d-awg-router-web
-```
-
-### Or via install.sh
-
-```bash
-curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh | bash
 ```
 
 ### launchd setup

@@ -33,21 +33,33 @@
 
 ## Быстрый старт
 
-### Установка из release
+### Установка одной строкой
 
 ```bash
-# Скачать последнюю версию
-curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
-chmod +x /tmp/d-awg-router-web
-echo "YOUR_PASSWORD"
-mkdir -p ~/.d-awg-router
-mv /tmp/d-awg-router-web ~/.d-awg-router/d-awg-router-web
+sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh | bash
 ```
 
-### Или через install.sh
+Скрипт автоматически:
+1. Проверит зависимости (`wg`, `wireguard-go`, `awg`, `amneziawg-go`)
+2. Установит Go (через Homebrew или скачиванием), если его нет
+3. Соберёт `amneziawg-go` из исходников
+4. Создаст симлинк `awg` → `wg` (совместимый CLI)
+5. Скачает и установит веб-сервис
+6. Настроит sudoers, launchd plist и директорию конфигов
+7. Запустит сервис
+
+> **Примечание:** GitHub CDN может кешировать `main` ветку. Если выдаёт старый скрипт — используйте версию по тегу:
+> ```bash
+> sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/v1/install.sh | bash
+> ```
+
+### Установка вручную
 
 ```bash
-curl -sfL https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh | bash
+curl -sfL -o /tmp/d-awg-router-web https://github.com/dantih/d-awgRouter/releases/latest/download/d-awg-router-web-darwin-arm64
+chmod +x /tmp/d-awg-router-web
+mkdir -p ~/.d-awg-router
+mv /tmp/d-awg-router-web ~/.d-awg-router/d-awg-router-web
 ```
 
 ### Настройка launchd

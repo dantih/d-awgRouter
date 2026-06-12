@@ -132,7 +132,7 @@ if ! sudo -n true 2>/dev/null; then
         echo "    curl -L -o /tmp/install.sh https://raw.githubusercontent.com/dantih/d-awgRouter/main/install.sh"
         echo "    chmod +x /tmp/install.sh && /tmp/install.sh"
         exit 1
-    }
+    fi
 fi
 
 # Keep sudo alive in background

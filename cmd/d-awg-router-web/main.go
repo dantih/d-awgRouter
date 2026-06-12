@@ -588,7 +588,7 @@ func findWireGuardGo() string {
 }
 
 func findActiveInterface() string {
-	// Сначала читаем state — это наш интерфейс, который поднял d-awgRouter
+	// Читаем state — это наш интерфейс, который поднял d-awgRouter
 	data, err := os.ReadFile(statePath())
 	if err == nil {
 		var s State
@@ -600,22 +600,14 @@ func findActiveInterface() string {
 			if out, err := sudo(awgBin, "show", s.Interface); err == nil && len(out) > 0 {
 				return s.Interface
 			}
-		}
-	}
-	// Fallback: wg show (на случай утерянного state)
-	for _, bin := range []string{wgBin, awgBin} {
-		if out, err := sudo(bin, "show"); err == nil {
-			for _, line := range strings.Split(out, "\n") {
-				if strings.HasPrefix(line, "interface: ") {
-					iface := strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
-					// Не трогаем utun6 (штатный WG)
-					if iface != "utun6" {
-						return iface
-					}
-				}
+			// Интерфейс есть в state, но не отвечает на wg show — возможно он упал
+			// Проверяем через ifconfig: если жив — всё равно возвращаем (может wg show глючит)
+			if out, _ := exec.Command("ifconfig", s.Interface).CombinedOutput(); len(out) > 0 {
+				return s.Interface
 			}
 		}
 	}
+	// Нет state — не наш интерфейс, возвращаем пустоту
 	return ""
 }
 

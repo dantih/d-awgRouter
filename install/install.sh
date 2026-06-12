@@ -123,11 +123,26 @@ else
     exit 1
 fi
 
-# --- Step 3: install binary ---
+# --- Step 3: install binary + version ---
 echo "[3/6] Устанавливаем $NAME → $BIN_DEST"
 sudo cp "$TMP_BIN" "$BIN_DEST"
 sudo chmod 755 "$BIN_DEST"
 rm -f "$TMP_BIN"
+
+# Save version
+VER_URL="https://raw.githubusercontent.com/$REPO/main/version.txt"
+echo -n "  ⏳ Версия... "
+if curl -sfL -o "$CONFIG_DIR/version.txt" "$VER_URL"; then
+    echo "✓ $(cat $CONFIG_DIR/version.txt)"
+else
+    # Fallback: генерируем из тега релиза
+    if [[ "$RELEASE_URL" =~ /releases/download/v?([0-9.]+)/ ]]; then
+        echo "${BASH_REMATCH[1]}" > "$CONFIG_DIR/version.txt"
+        echo "✓ (fallback) ${BASH_REMATCH[1]}"
+    else
+        echo "— (не критично)"
+    fi
+fi
 
 # --- Step 4: sudoers ---
 echo "[4/6] Настраиваем /etc/sudoers.d/d-awg-router"

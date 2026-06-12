@@ -155,6 +155,8 @@ if [ "$AWG_INSTALLED" = false ]; then
             sudo chmod +x /usr/local/bin/awg
         fi
         rm -rf "$TMPDIR"
+        # Clean up Go module cache to save space
+        "$GO_BIN" clean -modcache 2>/dev/null || true
         cd /tmp
     fi
 fi

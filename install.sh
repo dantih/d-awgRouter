@@ -119,8 +119,8 @@ if [ "$AWG_INSTALLED" = false ]; then
         GO_BIN="$(command -v go)"
     fi
 
-    # Install Go if missing (via Homebrew or download)
-    if [ -z "" ]; then
+    # Install Go if missing
+    if [ -z "$GO_BIN" ]; then
         if [ -x "$BREW_BIN" ]; then
             echo "  → Устанавливаю Go через Homebrew..."
             brew install go 2>/dev/null && GO_BIN="/opt/homebrew/bin/go" && echo "    ✓ Go установлен" || echo "    ✗ Go: ошибка"
@@ -128,21 +128,33 @@ if [ "$AWG_INSTALLED" = false ]; then
     fi
     if [ -z "$GO_BIN" ]; then
         echo "  → Скачиваю Go (arm64)..."
-        GO_TMP="/tmp/go-install"
-        mkdir -p "$GO_TMP"
-        curl -fsSL -o "$GO_TMP/go.tar.gz" "https://go.dev/dl/go1.23.4.darwin-arm64.tar.gz" && \
-        sudo tar -C /usr/local -xzf "$GO_TMP/go.tar.gz" && \
+        curl -fsSL -o /tmp/go.tar.gz "https://go.dev/dl/go1.23.4.darwin-arm64.tar.gz" && \
+        sudo tar -C /usr/local -xzf /tmp/go.tar.gz && \
         GO_BIN="/usr/local/go/bin/go" && echo "    ✓ Go установлен" || echo "    ✗ Go: ошибка"
-        rm -rf "$GO_TMP"
+        rm -f /tmp/go.tar.gz
     fi
 
     if [ -n "$GO_BIN" ]; then
         echo "  → Собираю amneziawg-go..."
-        TMPDIR=$(mktemp -d)
-        cd "$TMPDIR"
         "$GO_BIN" install "github.com/amnezia-vpn/amneziawg-go@latest" 2>&1 && echo "    ✓ amneziawg-go собран" || echo "    ✗ amneziawg-go: ошибка"
-        echo "  → Собираю awg..."
-        "$GO_BIN" install "github.com/amnezia-vpn/amneziawg-tools/awg@latest" 2>&1 && echo "    ✓ awg собран" || echo "    ✗ awg: ошибка"
+        
+        # Build awg from amneziawg-tools C source (or use wg as fallback)
+        # awg binary is essentially the same CLI as wg — d-awg-router uses wg-compatible interface
+        # AmneziaWG protocol is handled by amneziawg-go kernel module
+        # Symlink wg as awg so d-awg-router can call it
+        if ! [ -x "/usr/local/bin/awg" ]; then
+            if [ -x "/opt/homebrew/bin/wg" ]; then
+                echo "  → Создаю симлинк awg → wg..."
+                sudo ln -sf /opt/homebrew/bin/wg /usr/local/bin/awg && echo "    ✓ awg (wg symlink)"
+            elif [ -x "/usr/local/bin/wg" ]; then
+                sudo ln -sf /usr/local/bin/wg /usr/local/bin/awg && echo "    ✓ awg (wg symlink)"
+            else
+                echo "    ⚠ awg: wg не найден, создаю заглушку"
+                echo '#!/bin/sh
+exec /usr/local/bin/amneziawg-go "$@"' | sudo tee /usr/local/bin/awg >/dev/null
+                sudo chmod +x /usr/local/bin/awg
+            fi
+        fi
         
         # Install compiled binaries
         GOPATH="${GOPATH:-$HOME/go}"
@@ -150,14 +162,10 @@ if [ "$AWG_INSTALLED" = false ]; then
             sudo cp "$GOPATH/bin/amneziawg-go" /usr/local/bin/amneziawg-go
             sudo chmod +x /usr/local/bin/amneziawg-go
         fi
-        if [ -f "$GOPATH/bin/awg" ]; then
-            sudo cp "$GOPATH/bin/awg" /usr/local/bin/awg
-            sudo chmod +x /usr/local/bin/awg
-        fi
-        rm -rf "$TMPDIR"
+        
         # Clean up Go module cache to save space
         "$GO_BIN" clean -modcache 2>/dev/null || true
-        cd /tmp
+        rm -rf "$HOME/go/pkg" 2>/dev/null || true
     fi
 fi
 

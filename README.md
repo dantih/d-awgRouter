@@ -48,11 +48,6 @@ The script will automatically:
 6. Set up sudoers, launchd plist, and config directory
 7. Start the service
 
-> **Note:** GitHub raw CDN may cache `main` branch. If you get an outdated script, use the tagged version instead:
-> ```bash
-> sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/v1/install.sh | bash
-> ```
-
 ### Manual install
 
 ```bash

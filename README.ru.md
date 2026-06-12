@@ -48,11 +48,6 @@ sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/main/instal
 6. Настроит sudoers, launchd plist и директорию конфигов
 7. Запустит сервис
 
-> **Примечание:** GitHub CDN может кешировать `main` ветку. Если выдаёт старый скрипт — используйте версию по тегу:
-> ```bash
-> sudo curl -fsSL https://raw.githubusercontent.com/dantih/d-awgRouter/v1/install.sh | bash
-> ```
-
 ### Установка вручную
 
 ```bash

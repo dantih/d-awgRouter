@@ -588,23 +588,31 @@ func findWireGuardGo() string {
 }
 
 func findActiveInterface() string {
-	// Пробуем wg
-	if out, err := sudo(wgBin, "show"); err == nil {
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(line, "interface: ") {
-				iface := strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
-				// Не трогаем utun6 (штатный WG)
-				if iface != "utun6" {
-					return iface
-				}
+	// Сначала читаем state — это наш интерфейс, который поднял d-awgRouter
+	data, err := os.ReadFile(statePath())
+	if err == nil {
+		var s State
+		if json.Unmarshal(data, &s) == nil && s.Interface != "" {
+			// Проверяем, что интерфейс ещё жив
+			if out, err := sudo(wgBin, "show", s.Interface); err == nil && len(out) > 0 {
+				return s.Interface
+			}
+			if out, err := sudo(awgBin, "show", s.Interface); err == nil && len(out) > 0 {
+				return s.Interface
 			}
 		}
 	}
-	// Пробуем awg
-	if out, err := sudo(awgBin, "show"); err == nil {
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(line, "interface: ") {
-				return strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
+	// Fallback: wg show (на случай утерянного state)
+	for _, bin := range []string{wgBin, awgBin} {
+		if out, err := sudo(bin, "show"); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "interface: ") {
+					iface := strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
+					// Не трогаем utun6 (штатный WG)
+					if iface != "utun6" {
+						return iface
+					}
+				}
 			}
 		}
 	}
@@ -660,6 +668,10 @@ func removeAllRoutes() {
 	if iface == "" {
 		return
 	}
+	removeAllRoutesForIface(iface)
+}
+
+func removeAllRoutesForIface(iface string) {
 	for _, s := range loadRoutes() {
 		for _, c := range strings.Fields(loadCIDRCache(s)) {
 			sudo("route", "-q", "-n", "delete", strings.Split(c, "/")[0])
@@ -814,21 +826,50 @@ func saveState(iface, ip string) {
 	os.WriteFile(statePath(), d, 0644)
 }
 func clearState() { os.Remove(statePath()) }
+func loadState() *State {
+	data, err := os.ReadFile(statePath())
+	if err != nil {
+		return nil
+	}
+	var s State
+	if json.Unmarshal(data, &s) != nil {
+		return nil
+	}
+	return &s
+}
 
 func cmdDown() string {
+	st := loadState()
 	iface := findActiveInterface()
+	if iface == "" || (st != nil && st.Interface != "") {
+		// Если state говорит, что наш интерфейс отличается — используем state
+		if st != nil && st.Interface != "" {
+			// Проверяем, жив ли наш интерфейс из state
+			if out, _ := exec.Command("ifconfig", st.Interface).Output(); len(out) > 0 {
+				iface = st.Interface
+			}
+		}
+	}
 	if iface == "" {
 		return "[!] " + tr("s.none_active")
 	}
-	removeAllRoutes()
+	removeAllRoutesForIface(iface)
 
-	// Убиваем процесс (wireguard-go или amneziawg-go)
+	// Убиваем процесс (wireguard-go или amneziawg-go) — точное совпадение интерфейса
 	for _, name := range []string{"wireguard-go", "amneziawg-go"} {
-		pids, _ := exec.Command("pgrep", "-f", name+".*"+iface).Output()
-		if len(pids) > 0 {
-			sudo("kill", "-TERM", strings.TrimSpace(string(pids)))
-			time.Sleep(1 * time.Second)
-			sudo("kill", "-9", strings.TrimSpace(string(pids)))
+		pids, _ := exec.Command("pgrep", "-f", fmt.Sprintf("%s %s$", name, iface)).Output()
+		pidStr := strings.TrimSpace(string(pids))
+		if pidStr != "" {
+			// Разбиваем по строкам на случай нескольких PIDs
+			for _, pid := range strings.Split(pidStr, "\n") {
+				pid = strings.TrimSpace(pid)
+				if pid == "" {
+					continue
+				}
+				sudo("kill", "-TERM", pid)
+				time.Sleep(1 * time.Second)
+				sudo("kill", "-9", pid)
+			}
 		}
 	}
 	sudo("rm", "-f", fmt.Sprintf("/var/run/amneziawg/%s.sock", iface))

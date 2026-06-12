@@ -101,14 +101,62 @@ if [ -n "$NEED_BREW" ]; then
     echo ""
 fi
 
-# Install missing AmneziaWG binaries (awg, amneziawg-go)
-if ! [ -x "/usr/local/bin/awg" ]; then
-    echo "  → Скачиваю awg..."
-    sudo curl -fsSL -o /usr/local/bin/awg "https://github.com/amnezia-vpn/amneziawg-tools/raw/master/awg" && sudo chmod +x /usr/local/bin/awg && echo "    ✓ awg установлен" || echo "    ✗ awg: ошибка"
+# Install missing AmneziaWG binaries (awg, amneziawg-go) — build from source via Go
+AWG_INSTALLED=false
+
+if [ -x "/usr/local/bin/awg" ] && [ -x "/usr/local/bin/amneziawg-go" ]; then
+    echo "  ✓ awg, amneziawg-go уже установлены"
+    AWG_INSTALLED=true
 fi
-if ! [ -x "/usr/local/bin/amneziawg-go" ]; then
-    echo "  → Скачиваю amneziawg-go..."
-    sudo curl -fsSL -o /usr/local/bin/amneziawg-go "https://github.com/amnezia-vpn/amneziawg-go/raw/master/amneziawg-go" && sudo chmod +x /usr/local/bin/amneziawg-go && echo "    ✓ amneziawg-go установлен" || echo "    ✗ amneziawg-go: ошибка"
+
+if [ "$AWG_INSTALLED" = false ]; then
+    # Check for Go compiler
+    GO_BIN=""
+    for p in /usr/local/go/bin/go /opt/homebrew/bin/go /usr/bin/go; do
+        if [ -x "$p" ]; then GO_BIN="$p"; break; fi
+    done
+    if [ -z "$GO_BIN" ] && command -v go &>/dev/null; then
+        GO_BIN="$(command -v go)"
+    fi
+
+    # Install Go if missing (via Homebrew or download)
+    if [ -z "" ]; then
+        if [ -x "$BREW_BIN" ]; then
+            echo "  → Устанавливаю Go через Homebrew..."
+            brew install go 2>/dev/null && GO_BIN="/opt/homebrew/bin/go" && echo "    ✓ Go установлен" || echo "    ✗ Go: ошибка"
+        fi
+    fi
+    if [ -z "$GO_BIN" ]; then
+        echo "  → Скачиваю Go (arm64)..."
+        GO_TMP="/tmp/go-install"
+        mkdir -p "$GO_TMP"
+        curl -fsSL -o "$GO_TMP/go.tar.gz" "https://go.dev/dl/go1.23.4.darwin-arm64.tar.gz" && \
+        sudo tar -C /usr/local -xzf "$GO_TMP/go.tar.gz" && \
+        GO_BIN="/usr/local/go/bin/go" && echo "    ✓ Go установлен" || echo "    ✗ Go: ошибка"
+        rm -rf "$GO_TMP"
+    fi
+
+    if [ -n "$GO_BIN" ]; then
+        echo "  → Собираю amneziawg-go..."
+        TMPDIR=$(mktemp -d)
+        cd "$TMPDIR"
+        "$GO_BIN" install "github.com/amnezia-vpn/amneziawg-go@latest" 2>&1 && echo "    ✓ amneziawg-go собран" || echo "    ✗ amneziawg-go: ошибка"
+        echo "  → Собираю awg..."
+        "$GO_BIN" install "github.com/amnezia-vpn/amneziawg-tools/awg@latest" 2>&1 && echo "    ✓ awg собран" || echo "    ✗ awg: ошибка"
+        
+        # Install compiled binaries
+        GOPATH="${GOPATH:-$HOME/go}"
+        if [ -f "$GOPATH/bin/amneziawg-go" ]; then
+            sudo cp "$GOPATH/bin/amneziawg-go" /usr/local/bin/amneziawg-go
+            sudo chmod +x /usr/local/bin/amneziawg-go
+        fi
+        if [ -f "$GOPATH/bin/awg" ]; then
+            sudo cp "$GOPATH/bin/awg" /usr/local/bin/awg
+            sudo chmod +x /usr/local/bin/awg
+        fi
+        rm -rf "$TMPDIR"
+        cd /tmp
+    fi
 fi
 
 # --- Step 1: cache sudo ---
